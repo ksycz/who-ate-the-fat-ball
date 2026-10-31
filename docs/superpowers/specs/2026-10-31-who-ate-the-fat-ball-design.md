@@ -352,7 +352,18 @@ The prototypes are the reference for layout. This section fixes the behaviour.
 | 3 | Learning from the owner's corrections; Czech and Polish names |
 | Later | Optional hosted gallery, other cameras (RTSP/ONVIF), dark mode |
 
-## 16. Decisions already made (do not reopen without the owner)
+## 16. Portfolio use (added 2026-10-31)
+
+The owner will also use this project as a **portfolio piece**. That adds these requirements:
+- **Demo mode:** `fatball demo` runs the full app with a **fake camera and generated sample clips**, so anyone can try it without the hardware. The demo also powers screenshots and any later hosted demo.
+- **Privacy:**
+  - Real footage, camera serial numbers, IP and MAC addresses, and passwords are **never committed**.
+  - Test fixtures are generated (synthetic video) or hand-made.
+- **Code quality that shows:** CI on GitHub runs linting and every test on each push, and the badges appear in the README.
+- **README:** the problem, screenshots taken from demo mode, an architecture diagram, how to run the demo, and the design process (prototypes, critiques, decisions) as a short case study.
+- The repository stays **private** until the owner decides to make it public.
+
+## 17. Decisions already made (do not reopen without the owner)
 
 - **Look:** the Robin style; the N4b logo; the logo mark on the banner; Plus Jakarta Sans; no 700 weight; no bold on banners.
 - **Menus:**
