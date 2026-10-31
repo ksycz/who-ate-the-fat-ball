@@ -1,0 +1,13 @@
+# Private: camera footage, test reports (serial number, network details), local notes
+downloads/
+*_result.json
+HANDOFF.md
+config.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
