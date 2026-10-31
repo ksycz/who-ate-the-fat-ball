@@ -353,7 +353,7 @@ def test_decode_payload_strips_terminator():
   - `test_status_reports_low_disk`
   - `test_media_supports_range_requests`: `Range: bytes=0-99` gives a 206 with 100 bytes.
   - `test_media_rejects_path_traversal`: `/media/../library.sqlite` gives a 404.
-  - `test_setup_forbidden_from_lan_ip`: a client host of `192.168.50.9` gives a 403.
+  - `test_setup_forbidden_from_lan_ip`: a client host of `192.168.1.50` gives a 403.
   - `test_setup_password_never_in_db_or_logs(caplog)`
 - [ ] **Step 2: Run** `uv run pytest tests/api -v`. Expected: FAIL.
 - [ ] **Step 3: Implement.** Use `FileResponse`, or a small range handler if FastAPI's version can't do ranges.
