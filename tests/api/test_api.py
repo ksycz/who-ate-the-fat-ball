@@ -28,9 +28,43 @@ def test_status_ok_asleep_problem(local, conn, cam):
     repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(days=1, hours=1))
     assert _status(local)["camera"]["state"] == "problem"
 
-    repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(minutes=1), last_error="wrong password")
+    repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(minutes=1), last_error="wrong_password")
     body = _status(local)["camera"]
-    assert body["state"] == "problem" and body["last_error"] == "wrong password"
+    assert body["state"] == "problem" and body["last_error"] == "wrong_password"
+
+
+@pytest.mark.parametrize(("error", "state"), [
+    ("download_interrupted", "ok"),
+    ("clock_error", "ok"),
+    ("unreachable", "ok"),
+    ("camera_error", "ok"),
+    ("wrong_password", "problem"),
+    ("account_locked", "problem"),
+    ("no_password", "problem"),
+    ("low_disk", "problem"),
+    ("internal_error", "problem"),
+])
+def test_status_dot_follows_last_seen_except_actionable_errors(local, conn, cam, error, state):
+    repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(minutes=1), last_error=error)
+    body = _status(local)["camera"]
+    assert body["state"] == state
+    assert body["last_error"] == error
+
+
+def test_transient_error_while_asleep_today_is_asleep(local, conn, cam):
+    repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(hours=3), last_error="download_interrupted")
+    assert _status(local)["camera"]["state"] == "asleep"
+
+
+def test_watcher_error_codes_that_force_problem_are_ones_the_watcher_writes():
+    import inspect
+
+    from fatball.api import app as app_mod
+    from fatball.ingest import watcher
+
+    source = inspect.getsource(watcher)
+    for code in app_mod.ACTIONABLE_ERRORS:
+        assert f'"{code}"' in source
 
 
 def test_status_viewable_from_lan_and_reports_queue(lan, conn, cam):
@@ -205,3 +239,11 @@ def test_connect_waits_for_a_busy_database(settings):
         assert c.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000
     finally:
         c.close()
+
+
+def test_clips_kind_is_video_or_photo(local, conn, cam):
+    for i, kind in enumerate(["h264", "jpg"]):
+        b = datetime(2026, 10, 31, 8, i)
+        cid = repo.add_clip(conn, cam, f"/k{i}", b, b, kind, 1)
+        repo.set_clip_status(conn, cid, "ready")
+    assert [c["kind"] for c in local.get("/api/clips").json()] == ["photo", "video"]

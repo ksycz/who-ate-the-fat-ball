@@ -18,6 +18,11 @@ from fatball.ingest.watcher import CAMERA_NAME
 from fatball.library import db, repo
 
 RECENT = timedelta(hours=1)
+# Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
+# Everything else (an interrupted download, a clock that could not be set...) is reported in last_error
+# but leaves the dot to follow last_seen_at.
+ACTIONABLE_ERRORS = frozenset({"wrong_password", "account_locked", "no_password", "low_disk", "internal_error"})
+_KIND_NAMES = {"h264": "video", "jpg": "photo"}
 Pin = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}$")]
 
 
@@ -36,7 +41,8 @@ def _local_now() -> datetime:
 
 
 def _camera_state(cam: repo.Camera | None, now: datetime) -> str:
-    if cam is None or cam.last_seen_at is None or cam.last_error:
+    """ok = seen within the hour; asleep = seen earlier today; problem = not seen today, or an actionable error."""
+    if cam is None or cam.last_seen_at is None or cam.last_error in ACTIONABLE_ERRORS:
         return "problem"
     if now - cam.last_seen_at <= RECENT:
         return "ok"
@@ -89,7 +95,7 @@ def create_app(settings: Settings, *, now: Callable[[], datetime] = _local_now) 
                 "id": c.id,
                 "begin_at": c.begin_at.isoformat(),
                 "end_at": c.end_at.isoformat(),
-                "kind": c.kind,
+                "kind": _KIND_NAMES.get(c.kind, c.kind),
                 "duration_s": c.duration_s,
                 "web_url": _media_url(c.web_path),
                 "original_url": _media_url(c.original_path),
