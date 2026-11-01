@@ -58,7 +58,7 @@ def stored_passwords(monkeypatch):
 
 @pytest.fixture
 def app(settings, conn, clock, stored_passwords):
-    return create_app(settings, conn, now=clock)
+    return create_app(settings, now=clock)  # opens its own connection per request
 
 
 @pytest.fixture

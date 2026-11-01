@@ -2,6 +2,8 @@ import logging
 import shutil
 from datetime import datetime, timedelta
 
+import pytest
+
 from fatball.library import repo
 
 from .conftest import NOW
@@ -148,3 +150,58 @@ def test_setup_password_never_in_db_or_logs(local, conn, caplog, stored_password
 
 def test_media_nul_byte_is_404_not_500(local):
     assert local.get("/media/a%00b").status_code == 404
+
+
+def test_concurrent_requests_each_use_their_own_connection(make_client, conn, cam, monkeypatch):
+    import sqlite3
+    import threading
+
+    from fatball.library import db
+
+    repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(minutes=1))
+    make_client().put("/api/setup", json={"edit_pin": "1234"})
+    real_connect = db.connect
+    opened: list[tuple[sqlite3.Connection, int]] = []
+    lock = threading.Lock()
+
+    def spy(path):
+        c = real_connect(path)
+        with lock:
+            opened.append((c, threading.get_ident()))
+        return c
+
+    monkeypatch.setattr(db, "connect", spy)
+    n = 16
+    barrier = threading.Barrier(n)
+    results = []
+
+    def hit(i):
+        client = make_client((f"192.168.1.{60 + i}", 5000))
+        barrier.wait()
+        # An exception here is an unhandled thread exception, which -W error turns into a failure.
+        if i % 2:
+            results.append(client.get("/api/status").status_code)
+        else:
+            results.append(client.post("/api/unlock", json={"pin": "1234"}).status_code)
+
+    threads = [threading.Thread(target=hit, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(results) == [200] * (n // 2) + [204] * (n // 2)
+    assert len({id(c) for c, _ in opened}) >= n  # at least one fresh connection per request
+    for c, _ in opened:  # and every one was closed afterwards
+        with pytest.raises(sqlite3.ProgrammingError):
+            c.execute("SELECT 1")
+
+
+def test_connect_waits_for_a_busy_database(settings):
+    from fatball.library import db
+
+    c = db.connect(settings.db_path)
+    try:
+        assert c.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000
+    finally:
+        c.close()

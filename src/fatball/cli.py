@@ -78,8 +78,8 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
     from fatball.api.app import create_app
 
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    # One connection per thread: sqlite3 connections are not safe for concurrent use.
-    watcher_conn, processor_conn, api_conn = (db.connect(settings.db_path) for _ in range(3))
+    # One connection per thread: sqlite3 connections are not safe for concurrent use (the API opens its own).
+    watcher_conn, processor_conn = (db.connect(settings.db_path) for _ in range(2))
     stop = threading.Event()
     watcher = Watcher(settings, watcher_conn, sleep=stop.wait, **(watcher_options or {}))
     processor = Processor(settings, processor_conn)
@@ -97,7 +97,7 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
     print(f"Set up from this Mac at http://localhost:{port} (setup only works locally). Ctrl-C stops.")
 
     # proxy_headers=False: we never sit behind a proxy, so X-Forwarded-For must not make a client "local".
-    config = uvicorn.Config(create_app(settings, api_conn), host=host, port=port, proxy_headers=False)
+    config = uvicorn.Config(create_app(settings), host=host, port=port, proxy_headers=False)
     try:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
@@ -107,7 +107,7 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
         stop.set()
         for t in threads:
             t.join(timeout=15)
-        for c in (watcher_conn, processor_conn, api_conn):
+        for c in (watcher_conn, processor_conn):
             c.close()
         print("Stopped.")
 
@@ -179,7 +179,8 @@ def run_setup(
                 print("Edit PIN unchanged.")
                 break
             if auth_mod.valid_pin_format(pin):
-                auth_mod.Auth(conn, lambda: datetime.now().astimezone(), threading.Lock()).set_edit_pin(pin)
+                auth = auth_mod.Auth(lambda: db.connect(settings.db_path), lambda: datetime.now().astimezone())
+                auth.set_edit_pin(pin)
                 print("Edit PIN saved.")
                 break
             print("The edit PIN must be exactly 4 digits.")

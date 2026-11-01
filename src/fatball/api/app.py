@@ -2,12 +2,11 @@
 
 import shutil
 import sqlite3
-import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, StringConstraints
 
@@ -16,7 +15,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import repo
+from fatball.library import db, repo
 
 RECENT = timedelta(hours=1)
 Pin = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}$")]
@@ -50,18 +49,25 @@ def _media_url(path: str | None) -> str | None:
     return f"/media/{path}" if path else None
 
 
-def create_app(
-    settings: Settings, conn: sqlite3.Connection, *, now: Callable[[], datetime] = _local_now
-) -> FastAPI:
-    """Build the API. Writes to `conn` made here hold a lock, but that only orders this app's own writes;
-    it does not make a connection shared with other code safe, so give the API its own connection."""
+def create_app(settings: Settings, *, now: Callable[[], datetime] = _local_now) -> FastAPI:
+    """Build the API. Each request gets its own database connection (sqlite3 connections must not be
+    shared across FastAPI's thread pool); the database is created up front so requests never race to."""
+    db.connect(settings.db_path).close()
     app = FastAPI(title="Who Ate the Fat Ball?")
-    lock = threading.Lock()
-    auth = Auth(conn, lambda: now().astimezone(), lock)
+    auth = Auth(lambda: db.connect(settings.db_path), lambda: now().astimezone())
     app.state.auth = auth
 
+    def get_conn() -> Iterator[sqlite3.Connection]:
+        conn = db.connect(settings.db_path)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+
     @app.get("/api/status")
-    def status():
+    def status(conn: Conn):
         current = now().astimezone()
         cam = repo.get_camera(conn)
         free = shutil.disk_usage(settings.data_dir).free
@@ -76,7 +82,7 @@ def create_app(
         }
 
     @app.get("/api/clips")
-    def clips(limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
+    def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
         rows = repo.list_clips(conn, limit, before, status="ready")
         return [
             {
@@ -105,12 +111,11 @@ def create_app(
         return FileResponse(target)  # Starlette answers Range requests with 206
 
     @app.put("/api/setup", status_code=204)
-    def setup(body: SetupBody, request: Request):
+    def setup(body: SetupBody, request: Request, conn: Conn):
         if not auth_mod.is_local(request):
             raise HTTPException(status_code=403, detail="setup only works from the Mac itself")
-        with lock:
-            if body.ip is not None:
-                repo.upsert_camera(conn, CAMERA_NAME, None, body.ip)
+        if body.ip is not None:
+            repo.upsert_camera(conn, CAMERA_NAME, None, body.ip)
         if body.password is not None:
             camera_secrets.set_password(body.password)
         if body.edit_pin is not None:

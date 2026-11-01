@@ -9,8 +9,10 @@ import hmac
 import json
 import re
 import secrets as pysecrets
+import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -73,25 +75,37 @@ def _sha256(token: str) -> str:
 
 
 class Auth:
-    """PIN, editor tokens and the per-IP lockout. Writes to the shared connection hold `lock`."""
+    """PIN, editor tokens and the per-IP lockout.
 
-    def __init__(self, conn, now: Callable[[], datetime], lock: threading.Lock):
-        self.conn = conn
+    Every database operation opens its own short-lived connection from `connect`, so Auth is safe to
+    call from FastAPI's thread pool. Only the in-memory lockout state is shared, under its own lock.
+    """
+
+    def __init__(self, connect: Callable[[], sqlite3.Connection], now: Callable[[], datetime]):
+        self._connect = connect
         self.now = now
-        self.lock = lock
         self._lockout_lock = threading.Lock()
         self._failures: dict[str, int] = {}
         self._locked_until: dict[str, datetime] = {}
+
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def set_edit_pin(self, pin: str) -> None:
         if not valid_pin_format(pin):
             raise ValueError("the edit PIN must be exactly 4 digits")
         salt = pysecrets.token_bytes(16)
-        with self.lock:
-            repo.set_setting(self.conn, PIN_KEY, f"scrypt${salt.hex()}${_scrypt(pin, salt).hex()}")
+        with self._db() as conn:
+            repo.set_setting(conn, PIN_KEY, f"scrypt${salt.hex()}${_scrypt(pin, salt).hex()}")
 
     def _pin_matches(self, pin: str) -> bool:
-        stored = repo.get_setting(self.conn, PIN_KEY)
+        with self._db() as conn:
+            stored = repo.get_setting(conn, PIN_KEY)
         if not stored:
             return False
         try:
@@ -127,16 +141,23 @@ class Auth:
 
     def _issue_token(self) -> str:
         token = pysecrets.token_urlsafe(32)
-        with self.lock:
-            hashes = json.loads(repo.get_setting(self.conn, TOKENS_KEY) or "[]")
-            hashes.append(_sha256(token))
-            repo.set_setting(self.conn, TOKENS_KEY, json.dumps(hashes))
+        with self._db() as conn:
+            # BEGIN IMMEDIATE takes the write lock before reading, so concurrent unlocks never drop a token.
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                hashes = json.loads(repo.get_setting(conn, TOKENS_KEY) or "[]")
+                hashes.append(_sha256(token))
+                repo.set_setting(conn, TOKENS_KEY, json.dumps(hashes))  # commits
+            except BaseException:
+                conn.rollback()
+                raise
         return token
 
     def token_is_valid(self, token: str | None) -> bool:
         if not token:
             return False
-        hashes = json.loads(repo.get_setting(self.conn, TOKENS_KEY) or "[]")
+        with self._db() as conn:
+            hashes = json.loads(repo.get_setting(conn, TOKENS_KEY) or "[]")
         candidate = _sha256(token)
         return any(hmac.compare_digest(candidate, h) for h in hashes)
 

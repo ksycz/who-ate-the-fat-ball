@@ -5,15 +5,17 @@ from importlib import resources
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+BUSY_TIMEOUT_S = 5.0
 
 
 def connect(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the library database.
 
     check_same_thread=False lets a connection be created in one thread and handed to another, but
-    sqlite3 connections are still not safe for concurrent use: callers use one connection per thread.
+    sqlite3 connections are still not safe for concurrent use: callers use one connection per thread
+    (the API opens one per request). A busy timeout makes concurrent writers wait instead of failing.
     """
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, timeout=BUSY_TIMEOUT_S, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
