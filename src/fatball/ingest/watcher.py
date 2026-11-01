@@ -31,6 +31,12 @@ CAMERA_USER = "admin"
 # so a clean tick counts as covering "now minus this" rather than now.
 LISTING_GRACE = timedelta(minutes=10)
 MAX_DOWNLOAD_FAILURES = 3
+# A sleeping camera simply doesn't answer, so a silent last_ip is normal (spec §11: the idle check is a
+# single TCP connect). The /24 is only scanned once the camera has been unseen at last_ip for this long,
+# or has never been seen; failed scans then back off 15 min, 30 min, ... up to 4 h.
+SCAN_AFTER_UNSEEN = timedelta(hours=1)
+SCAN_BACKOFF_FIRST = timedelta(minutes=15)
+SCAN_BACKOFF_MAX = timedelta(hours=4)
 KIND = "h264"
 
 
@@ -55,21 +61,23 @@ class Watcher:
         now: Callable[[], datetime] = datetime.now,
         sleep: Callable[[float], None] = time.sleep,
         find: Callable[[str, int, str | None], str | None] = discovery.find_camera,
+        arp_lookup: Callable[[str], str | None] = discovery.arp_lookup,
         password: Callable[[], str | None] = secrets.get_password,
         client_timeout: float = 8.0,
         silence_s: float = 6.0,
         probe_timeout: float = 1.0,
-        discovery_interval_s: float = 60.0,
     ) -> None:
         self.settings, self.conn = settings, conn
         self._connect, self._now, self._sleep, self._find, self._password = connect, now, sleep, find, password
+        self._arp_lookup = arp_lookup
         self._client_timeout, self._silence_s = client_timeout, silence_s
-        self._probe_timeout, self._discovery_interval_s = probe_timeout, discovery_interval_s
+        self._probe_timeout = probe_timeout
         self._covered_through: date | None = None  # files up to the start of this day are known
         self._failures: dict[tuple[str, datetime], int] = {}
         self._backoff_until: datetime | None = None
         self._backoff_reason = "wrong_password"
-        self._last_discovery: datetime | None = None
+        self._scan_backoff: timedelta | None = None  # None until a full scan fails
+        self._next_scan_at: datetime | None = None
         self._stop = threading.Event()
         self._clean_up_interrupted_downloads()
 
@@ -184,22 +192,47 @@ class Watcher:
         return now.astimezone().replace(tzinfo=None) if now.tzinfo else now
 
     def _locate(self, camera: repo.Camera, now: datetime) -> str | None:
-        """The camera's address if it answers a TCP connect; otherwise try discovery (rate-limited)."""
+        """The camera's address if it answers a TCP connect, else None.
+
+        last_ip first; then the ARP table for the camera's MAC (cheap); a full /24 scan only when the
+        camera has been unseen at last_ip for over an hour (or never seen, or no last_ip yet), with
+        exponential back-off between failed scans.
+        """
         port = self.settings.camera_port
         if camera.last_ip and discovery.is_open(camera.last_ip, port, self._probe_timeout):
-            return camera.last_ip
-        if (self._last_discovery is not None
-                and (now - self._last_discovery).total_seconds() < self._discovery_interval_s):
+            return self._located(camera.last_ip)
+        if camera.mac:
+            ip = self._arp_lookup(camera.mac)
+            if ip and ip != camera.last_ip and discovery.is_open(ip, port, self._probe_timeout):
+                log.info("camera found at %s via the ARP table", ip)
+                return self._located(ip)
+        if camera.last_ip and self._seen_recently(camera, now):
+            return None  # most likely just asleep
+        if self._next_scan_at is not None and now < self._next_scan_at:
             return None
-        self._last_discovery = now
         subnet = camera.last_ip or discovery.local_ipv4()
         if subnet is None:
             return None
         found = self._find(subnet, port, camera.mac)
-        if found is None or not discovery.is_open(found, port, self._probe_timeout):
-            return None
-        log.info("camera rediscovered at %s", found)
-        return found
+        if found is not None and discovery.is_open(found, port, self._probe_timeout):
+            log.info("camera rediscovered at %s", found)
+            return self._located(found)
+        self._scan_backoff = (SCAN_BACKOFF_FIRST if self._scan_backoff is None
+                              else min(self._scan_backoff * 2, SCAN_BACKOFF_MAX))
+        self._next_scan_at = now + self._scan_backoff
+        log.info("camera not found on the network; next scan in %s", self._scan_backoff)
+        return None
+
+    def _located(self, host: str) -> str:
+        self._scan_backoff = self._next_scan_at = None
+        return host
+
+    @staticmethod
+    def _seen_recently(camera: repo.Camera, now: datetime) -> bool:
+        if camera.last_seen_at is None:
+            return False
+        seen = camera.last_seen_at.astimezone().replace(tzinfo=None)  # repo returns aware; `now` is naive
+        return now - seen <= SCAN_AFTER_UNSEEN
 
     def _fix_clock(self, client: XMClient, camera_id: int, now: datetime) -> bool:
         """Best effort (the time message ids are unverified on the real camera). False if it failed."""

@@ -22,3 +22,9 @@ def test_arp_table_finds_mac_with_dropped_leading_zeros(fake_camera, monkeypatch
 def test_scan_finds_open_port_on_the_subnet(fake_camera, monkeypatch):
     monkeypatch.setattr(discovery, "arp_table", dict)
     assert discovery.find_camera("127.0.0.0/30", fake_camera.port, "aa:bb:cc:dd:ee:ff") == "127.0.0.1"
+
+
+def test_arp_lookup_normalises_the_mac(monkeypatch):
+    monkeypatch.setattr(discovery, "arp_table", lambda: {"0a:0b:0c:0d:0e:0f": "192.168.1.9"})
+    assert discovery.arp_lookup("A:B:C:D:E:F") == "192.168.1.9"
+    assert discovery.arp_lookup("aa:aa:aa:aa:aa:aa") is None

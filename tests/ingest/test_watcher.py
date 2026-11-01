@@ -335,3 +335,89 @@ def test_crash_leftovers_are_cleaned_on_start_and_the_clip_refetched(tmp_path, c
     assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
     [again] = _downloaded(conn)
     assert again.sd_path == f.sd_path and (tmp_path / "media" / again.raw_path).read_bytes() == PAYLOAD
+
+
+def _scan_log():
+    calls = []
+
+    def find(subnet, port, mac):
+        calls.append(subnet)
+
+    return calls, find
+
+
+def test_sleeping_camera_seen_within_the_hour_is_never_scanned_for(tmp_path, conn, cam):
+    cam.awake = False
+    calls, find = _scan_log()
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock, find=find, arp_lookup=lambda mac: None)
+    repo.update_camera_status(conn, repo.get_camera(conn).id, last_seen_at=NOW - timedelta(minutes=1))
+    for minute in range(60):
+        clock.t = NOW + timedelta(minutes=minute)
+        assert w.tick() == TickResult(reachable=False, downloaded=0, error=None)
+    assert calls == []
+
+
+def test_arp_table_finds_camera_at_a_new_ip_without_scanning(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    calls, find = _scan_log()
+    looked_up = []
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), ip="10.255.255.1", find=find,
+                 arp_lookup=lambda mac: looked_up.append(mac) or "127.0.0.1")
+    camera_id = repo.upsert_camera(conn, "feeder", "aa:bb:cc:dd:ee:ff", None)
+    repo.update_camera_status(conn, camera_id, last_seen_at=NOW - timedelta(minutes=5))
+
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
+    assert looked_up == ["aa:bb:cc:dd:ee:ff"] and calls == []
+    assert repo.get_camera(conn).last_ip == "127.0.0.1"
+
+
+def test_full_scans_back_off_exponentially_up_to_four_hours(tmp_path, conn, cam):
+    cam.awake = False  # never seen, so scanning is allowed, but with back-off
+    calls = []
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock, find=lambda s, p, m: (calls.append(clock.t), None)[1],
+                 arp_lookup=lambda mac: None)
+    for minute in range(12 * 60):
+        clock.t = NOW + timedelta(minutes=minute)
+        w.tick()
+    minutes = [int((t - NOW).total_seconds() // 60) for t in calls]
+    assert minutes == [0, 15, 45, 105, 225, 465, 705]
+
+
+def test_scan_back_off_resets_once_the_camera_is_found(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    clock = Clock(NOW)
+    scans = []
+
+    def find(subnet, port, mac):
+        scans.append(clock.t)
+        return "127.0.0.1" if len(scans) == 3 else None
+
+    w = _watcher(tmp_path, conn, cam, clock, ip="10.255.255.1", find=find, arp_lookup=lambda mac: None)
+    expected = {0: False, 14: False, 15: False, 44: False, 45: True}
+    for minute, reachable in expected.items():
+        clock.t = NOW + timedelta(minutes=minute)
+        assert w.tick().reachable is reachable
+    assert len(scans) == 3
+
+    cam.awake = False  # seen at minute 45 on 127.0.0.1, then asleep
+    for minute in (100, 105):  # within the hour since last seen: no scan
+        clock.t = NOW + timedelta(minutes=minute)
+        w.tick()
+    assert len(scans) == 3
+    for minute in (106, 120, 121):  # unseen > 1 h: scan, then back off 15 min (reset), not 4 h
+        clock.t = NOW + timedelta(minutes=minute)
+        w.tick()
+    assert [int((t - NOW).total_seconds() // 60) for t in scans[3:]] == [106, 121]
+
+
+def test_first_run_without_an_ip_scans_the_local_subnet_with_back_off(tmp_path, conn, cam, monkeypatch):
+    monkeypatch.setattr(watcher_mod.discovery, "local_ipv4", lambda: "192.168.1.5")
+    calls, find = _scan_log()
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock, ip=None, find=find, arp_lookup=lambda mac: None)
+    for minute in (0, 1, 14):
+        clock.t = NOW + timedelta(minutes=minute)
+        assert w.tick().reachable is False
+    assert calls == ["192.168.1.5"]

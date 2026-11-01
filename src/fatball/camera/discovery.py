@@ -36,6 +36,11 @@ def arp_table() -> dict[str, str]:
     return {_norm_mac(m.group(2)): m.group(1) for m in _ARP_LINE.finditer(out)}
 
 
+def arp_lookup(mac: str) -> str | None:
+    """The IP the ARP table currently gives for `mac` (cheap: no network traffic), or None."""
+    return arp_table().get(_norm_mac(mac))
+
+
 def local_ipv4() -> str | None:
     """This machine's LAN address (a UDP connect sends nothing)."""
     try:
@@ -58,7 +63,7 @@ def find_camera(subnet: str, port: int, mac: str | None) -> str | None:
     if "/" not in subnet and is_open(subnet, port):
         return subnet
     if mac:
-        ip = arp_table().get(_norm_mac(mac))
+        ip = arp_lookup(mac)
         if ip and is_open(ip, port):
             return ip
     hosts = [str(h) for h in _network(subnet).hosts()]
