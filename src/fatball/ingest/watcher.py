@@ -71,6 +71,30 @@ class Watcher:
         self._backoff_reason = "wrong_password"
         self._last_discovery: datetime | None = None
         self._stop = threading.Event()
+        self._clean_up_interrupted_downloads()
+
+    def _clean_up_interrupted_downloads(self) -> None:
+        """Forget downloads a crash cut short, so the next tick fetches them again.
+
+        Deletes 'downloading' rows, stray *.part files and raw files no completed clip references
+        (a raw file only becomes referenced once its download finished).
+        """
+        dropped = repo.delete_clips_with_status(self.conn, "downloading")
+        raw_dir = self.settings.media_dir / "raw"
+        if not raw_dir.is_dir():
+            if dropped:
+                log.info("forgot %d interrupted download(s)", dropped)
+            return
+        media = self.settings.media_dir
+        keep = {(media / p).resolve() for p in repo.referenced_raw_paths(self.conn)}
+        removed = 0
+        for path in raw_dir.iterdir():
+            stray = path.name.endswith(".part") or (path.suffix == ".raw" and path.resolve() not in keep)
+            if stray and path.is_file():
+                path.unlink(missing_ok=True)
+                removed += 1
+        if dropped or removed:
+            log.info("forgot %d interrupted download(s); removed %d leftover file(s)", dropped, removed)
 
     # public API
     def run_forever(self) -> None:
@@ -231,6 +255,7 @@ class Watcher:
                 if self._failures[key] == MAX_DOWNLOAD_FAILURES:
                     log.warning("giving up on %s after %d failed downloads", f.sd_path, MAX_DOWNLOAD_FAILURES)
             raise
-        repo.set_clip_status(self.conn, clip_id, "downloaded", raw_path=str(dest))
+        repo.set_clip_status(self.conn, clip_id, "downloaded",
+                             raw_path=dest.relative_to(self.settings.media_dir).as_posix())
         log.info("downloaded %s (%d bytes) as clip %d", f.sd_path, size, clip_id)
         return 1

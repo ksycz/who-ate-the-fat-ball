@@ -15,8 +15,8 @@ CREATE TABLE clip (
     begin_at TEXT NOT NULL,
     end_at TEXT NOT NULL,
     kind TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'downloaded'
-        CHECK (status IN ('downloaded', 'processing', 'ready', 'failed')),
+    status TEXT NOT NULL DEFAULT 'downloading'
+        CHECK (status IN ('downloading', 'downloaded', 'processing', 'ready', 'failed')),
     raw_path TEXT,
     original_path TEXT,
     web_path TEXT,

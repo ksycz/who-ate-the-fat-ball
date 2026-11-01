@@ -80,8 +80,45 @@ def test_aware_input_is_normalised_to_local(conn, cam):
     assert datetime.fromisoformat(stored).utcoffset() == aware.utcoffset()
 
 
+def test_new_clip_is_downloading_until_marked_downloaded(conn, cam):
+    cid = _add(conn, cam)
+    assert [c.id for c in repo.clips_with_status(conn, "downloading")] == [cid]
+    assert repo.clips_with_status(conn, "downloaded") == []
+    repo.set_clip_status(conn, cid, "downloaded", raw_path=f"raw/{cid}.raw")
+    assert [c.raw_path for c in repo.clips_with_status(conn, "downloaded")] == [f"raw/{cid}.raw"]
+
+
+def test_schema_rejects_unknown_status(conn, cam):
+    import sqlite3
+
+    cid = _add(conn, cam)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE clip SET status = 'bogus' WHERE id = ?", (cid,))
+
+
+def test_claim_for_processing_is_atomic_and_rereads_the_row(conn, cam):
+    cid = _add(conn, cam)
+    assert repo.claim_for_processing(conn, cid) is None  # still downloading
+    repo.set_clip_status(conn, cid, "downloaded", raw_path=f"raw/{cid}.raw")
+    claimed = repo.claim_for_processing(conn, cid)
+    assert claimed is not None and claimed.status == "processing" and claimed.raw_path == f"raw/{cid}.raw"
+    assert repo.claim_for_processing(conn, cid) is None  # already claimed
+    assert repo.claim_for_processing(conn, 9999) is None
+
+
+def test_delete_clips_with_status_and_referenced_raw_paths(conn, cam):
+    a = _add(conn, cam, path="/a")
+    b = _add(conn, cam, path="/b")
+    repo.set_clip_status(conn, b, "ready", raw_path="raw/b.raw")
+    assert repo.delete_clips_with_status(conn, "downloading") == 1
+    assert [c.id for c in repo.list_clips(conn, 10, None)] == [b]
+    assert a not in {c.id for c in repo.list_clips(conn, 10, None)}
+    assert repo.referenced_raw_paths(conn) == {"raw/b.raw"}
+
+
 def test_status_transitions_and_paths(conn, cam):
     cid = _add(conn, cam)
+    repo.set_clip_status(conn, cid, "downloaded")
     assert [c.id for c in repo.clips_with_status(conn, "downloaded")] == [cid]
     repo.set_clip_status(conn, cid, "processing", raw_path="/r/a.h265")
     repo.set_clip_status(

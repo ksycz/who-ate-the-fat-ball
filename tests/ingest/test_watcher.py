@@ -67,7 +67,7 @@ def test_first_tick_catches_up_seven_days_newest_first(tmp_path, conn, cam):
     by_id = sorted(clips, key=lambda c: c.id)
     assert [c.begin_at for c in by_id] == sorted((c.begin_at for c in clips), reverse=True)
     for c in clips:
-        assert c.raw_path == str(tmp_path / "media" / "raw" / f"{c.id}.raw")
+        assert c.raw_path == f"raw/{c.id}.raw"  # relative to media_dir
         assert (tmp_path / "media" / "raw" / f"{c.id}.raw").read_bytes() == PAYLOAD
     camera = repo.get_camera(conn)
     assert camera.last_error is None
@@ -296,3 +296,42 @@ def test_more_than_64_clips_in_one_day_are_all_ingested(tmp_path, conn, cam):
     w = _watcher(tmp_path, conn, cam, Clock(NOW))
     assert w.tick() == TickResult(reachable=True, downloaded=70, error=None)
     assert len(_downloaded(conn)) == 70
+
+
+def test_clip_is_downloading_while_its_download_runs(tmp_path, conn, cam, monkeypatch):
+    real_download = XMClient.download
+    statuses = []
+
+    def download(self, f, dest):
+        statuses.extend(c.status for c in repo.list_clips(conn, 10, None))
+        return real_download(self, f, dest)
+
+    monkeypatch.setattr(XMClient, "download", download)
+    cam.add_file(_file(NOW.replace(hour=9)))
+    w = _watcher(tmp_path, conn, cam, Clock(NOW))
+    assert w.tick().downloaded == 1
+    assert statuses == ["downloading"]
+    assert [c.status for c in repo.list_clips(conn, 10, None)] == ["downloaded"]
+
+
+def test_crash_leftovers_are_cleaned_on_start_and_the_clip_refetched(tmp_path, conn, cam):
+    f = _file(NOW.replace(hour=9))
+    cam.add_file(f)
+    camera_id = repo.upsert_camera(conn, "feeder", None, "127.0.0.1")
+    crashed = repo.add_clip(conn, camera_id, f.sd_path, f.begin, f.end, "h264", 1)  # left 'downloading'
+    kept = repo.add_clip(conn, camera_id, "/other", NOW.replace(hour=8), NOW.replace(hour=8), "h264", 1)
+    repo.set_clip_status(conn, kept, "ready", raw_path=f"raw/{kept}.raw")
+    raw = tmp_path / "media" / "raw"
+    raw.mkdir(parents=True)
+    (raw / f"{crashed}.raw.part").write_bytes(b"half")
+    (raw / f"{crashed}.raw").write_bytes(b"renamed but row never flipped")
+    (raw / "12345.raw").write_bytes(b"orphan")
+    (raw / f"{kept}.raw").write_bytes(b"keep me")
+
+    w = _watcher(tmp_path, conn, cam, Clock(NOW))
+
+    assert repo.clips_with_status(conn, "downloading") == []
+    assert sorted(p.name for p in raw.iterdir()) == [f"{kept}.raw"]
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
+    [again] = _downloaded(conn)
+    assert again.sd_path == f.sd_path and (tmp_path / "media" / again.raw_path).read_bytes() == PAYLOAD

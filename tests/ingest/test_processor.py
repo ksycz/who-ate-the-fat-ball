@@ -29,12 +29,12 @@ def _clip(conn, settings, data: bytes, kind: str = "h264", status: str = "downlo
     raw = settings.media_dir / "raw" / f"{clip_id}.raw"
     raw.parent.mkdir(parents=True, exist_ok=True)
     raw.write_bytes(data)
-    repo.set_clip_status(conn, clip_id, status, raw_path=str(raw))
+    repo.set_clip_status(conn, clip_id, status, raw_path=f"raw/{clip_id}.raw")
     return clip_id, raw
 
 
 def _get(conn, clip_id):
-    return next(c for s in ("downloaded", "processing", "ready", "failed")
+    return next(c for s in ("downloading", "downloaded", "processing", "ready", "failed")
                 for c in repo.clips_with_status(conn, s) if c.id == clip_id)
 
 
@@ -67,7 +67,7 @@ def test_unexpected_error_fails_that_clip_only(settings, conn, xm_clip_bytes, mo
     good = repo.add_clip(conn, cam, "/idea0/b", BEGIN.replace(hour=10), BEGIN, "h264", 1)
     raw = settings.media_dir / "raw" / f"{good}.raw"
     raw.write_bytes(xm_clip_bytes)
-    repo.set_clip_status(conn, good, "downloaded", raw_path=str(raw))
+    repo.set_clip_status(conn, good, "downloaded", raw_path=f"raw/{good}.raw")
     real = processor_mod.convert_clip
 
     def flaky(raw_path, out_dir):
@@ -95,3 +95,47 @@ def test_processing_is_resumable_after_crash(settings, conn):
     clip_id, _ = _clip(conn, settings, b"x", status="processing")
     Processor(settings, conn)
     assert _get(conn, clip_id).status == "downloaded"
+
+
+def test_in_flight_downloading_clip_is_not_processed(settings, conn):
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    clip_id = repo.add_clip(conn, cam, "/idea0/inflight", BEGIN, BEGIN, "h264", 1)
+    assert Processor(settings, conn).process_pending() == 0
+    assert _get(conn, clip_id).status == "downloading"
+
+
+def test_skips_a_clip_another_worker_already_claimed(settings, conn, monkeypatch):
+    clip_id, _ = _clip(conn, settings, b"x")
+    real = repo.clips_with_status
+    converted = []
+
+    def snapshot_then_lose_race(c, status):
+        clips = real(c, status)
+        c.execute("UPDATE clip SET status = 'processing' WHERE id = ?", (clip_id,))  # the other worker
+        c.commit()
+        return clips
+
+    p = Processor(settings, conn)
+    monkeypatch.setattr(processor_mod.repo, "clips_with_status", snapshot_then_lose_race)
+    monkeypatch.setattr(p, "_convert", lambda clip: converted.append(clip) or {})
+    assert p.process_pending() == 0
+    assert converted == []
+    assert _get(conn, clip_id).status == "processing"
+
+
+def test_processor_uses_raw_path_read_at_claim_time(settings, conn, monkeypatch):
+    clip_id, _ = _clip(conn, settings, b"x", kind="jpg")
+    real = repo.clips_with_status
+
+    def stale_snapshot(c, status):
+        clips = real(c, status)
+        for clip in clips:
+            clip.raw_path = None  # snapshot taken before the watcher filled raw_path in
+        return clips
+
+    seen = []
+    monkeypatch.setattr(processor_mod.repo, "clips_with_status", stale_snapshot)
+    monkeypatch.setattr(processor_mod, "extract_jpeg", lambda raw: seen.append(raw) or b"\xff\xd8\xff\xd9")
+    assert Processor(settings, conn).process_pending() == 1
+    assert seen == [b"x"]
+    assert _get(conn, clip_id).status == "ready"

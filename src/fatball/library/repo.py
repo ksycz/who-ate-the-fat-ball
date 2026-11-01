@@ -12,8 +12,9 @@ from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import Literal
 
-Status = Literal["downloaded", "processing", "ready", "failed"]
-_STATUSES = ("downloaded", "processing", "ready", "failed")
+# downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
+Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
+_STATUSES = ("downloading", "downloaded", "processing", "ready", "failed")
 _PATH_COLUMNS = frozenset(
     {"original_path", "web_path", "poster_path", "preview_path", "raw_path", "duration_s"}
 )
@@ -118,10 +119,13 @@ def add_clip(
     kind: str,
     size_bytes: int,
 ) -> int | None:
-    """Insert a clip with status 'downloaded'. Returns None if (sd_path, begin_at) already exists."""
+    """Insert a clip with status 'downloading'. Returns None if (sd_path, begin_at) already exists.
+
+    The caller marks it 'downloaded' (with raw_path) once the file is complete, or deletes it.
+    """
     cur = conn.execute(
-        "INSERT OR IGNORE INTO clip(camera_id, sd_path, begin_at, end_at, kind, size_bytes) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO clip(camera_id, sd_path, begin_at, end_at, kind, size_bytes, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'downloading')",
         (camera_id, sd_path, _iso(begin_at), _iso(end_at), kind, size_bytes),
     )
     conn.commit()
@@ -132,6 +136,32 @@ def delete_clip(conn: sqlite3.Connection, clip_id: int) -> None:
     """Remove a clip row (used to forget a download that did not complete, so it is retried)."""
     conn.execute("DELETE FROM clip WHERE id = ?", (clip_id,))
     conn.commit()
+
+
+def delete_clips_with_status(conn: sqlite3.Connection, status: Status) -> int:
+    """Remove every clip in `status`; returns how many. Used to forget downloads a crash cut short."""
+    cur = conn.execute("DELETE FROM clip WHERE status = ?", (status,))
+    conn.commit()
+    return cur.rowcount
+
+
+def referenced_raw_paths(conn: sqlite3.Connection) -> set[str]:
+    """raw_path of every clip whose download completed (any status but 'downloading')."""
+    rows = conn.execute("SELECT raw_path FROM clip WHERE status != 'downloading' AND raw_path IS NOT NULL")
+    return {r["raw_path"] for r in rows}
+
+
+def claim_for_processing(conn: sqlite3.Connection, clip_id: int) -> Clip | None:
+    """Atomically move a 'downloaded' clip to 'processing' and return it as now stored.
+
+    None if the clip is not (or no longer) 'downloaded', e.g. another worker claimed it first.
+    """
+    cur = conn.execute("UPDATE clip SET status = 'processing' WHERE id = ? AND status = 'downloaded'", (clip_id,))
+    conn.commit()
+    if cur.rowcount != 1:
+        return None
+    row = conn.execute("SELECT * FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return _clip(row) if row is not None else None
 
 
 def known_clip_keys(conn: sqlite3.Connection, day: date) -> set[tuple[str, datetime]]:
