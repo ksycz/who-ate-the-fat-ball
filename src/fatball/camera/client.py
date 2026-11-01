@@ -25,6 +25,8 @@ from fatball.camera.protocol import (
 _TIME_FMT = "%Y-%m-%d %H:%M:%S"
 _WRONG_PASSWORD = {203, 205}
 _LOCKED = 206
+# The real camera's FileLength over-reports by ~1%, so a complete file can be a bit under size_kb*1024.
+MIN_COMPLETE_RATIO = 0.9
 
 
 class CameraError(Exception):
@@ -193,7 +195,7 @@ class XMClient:
             raise
         finally:
             data_conn.close()
-        if f.size_kb > 0 and total < expected:
+        if f.size_kb > 0 and total < expected * MIN_COMPLETE_RATIO:
             part.unlink(missing_ok=True)
             raise DownloadInterrupted(f"got {total} of {expected} bytes for {f.sd_path}")
         part.replace(dest)

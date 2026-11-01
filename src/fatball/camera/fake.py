@@ -38,6 +38,7 @@ class FakeFile:
     end: datetime
     kind: Literal["h264", "jpg"]
     payload: bytes
+    reported_kb: int | None = None  # override FileLength, to mimic the real camera over-reporting
 
     @property
     def sd_path(self) -> str:
@@ -247,7 +248,7 @@ class FakeCamera:
             hits = sorted((f for f in self.files if f.kind == q.get("Type", "h264")
                            and f"{f.begin:%Y-%m-%d}" == day), key=lambda f: f.begin)
         return [{"BeginTime": f.begin.strftime(_TIME_FMT), "EndTime": f.end.strftime(_TIME_FMT),
-                 "FileLength": f"0x{-(-len(f.payload) // 1024):08X}", "FileName": f.sd_path,
+                 "FileLength": f"0x{f.reported_kb if f.reported_kb is not None else -(-len(f.payload) // 1024):08X}", "FileName": f.sd_path,
                  "DiskNo": 0, "SerialNo": 0} for f in hits[:MAX_QUERY_RESULTS]]
 
     def _start_download(self, name: str) -> None:

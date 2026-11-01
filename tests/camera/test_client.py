@@ -86,3 +86,15 @@ def test_camera_time_and_set_time_sends_mac_time(fake_camera):
         cam.set_time(target)
         assert cam.camera_time() == target
     assert fake_camera.set_time_calls == [target]
+
+
+def test_download_accepts_camera_size_overreport(fake_camera, tmp_path):
+    payload = b"q" * 100_000
+    fake_camera.add_file(FakeFile(BEGIN, END, "h264", payload, reported_kb=101))  # advertises ~1% more than it sends
+    dest = tmp_path / "clip.raw"
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        [f] = cam.list_files(date(2026, 10, 30), "h264")
+        assert f.size_kb * 1024 > len(payload)
+        assert cam.download(f, dest) == len(payload)
+    assert dest.read_bytes() == payload
