@@ -45,7 +45,7 @@ The owner has a battery- and solar-powered iCSee outdoor camera pointed at a bir
 ## 3. Users and devices
 
 - **The owner** checks the gallery on an **Android phone** (main device), an **iPad** and a **Mac**. She isn't a developer and cares a lot about visuals.
-- **The family** may look at the gallery on the same home Wi-Fi.
+- **Someone else in the house** may look at the gallery on the same home Wi-Fi. They can **view only**; editing needs the owner's edit PIN.
 - **The Mac** runs the background service, and it must be on and at home for clips to arrive. Clips missed while it was off are fetched later, because they stay on the camera's SD card.
 
 ## 4. Architecture
@@ -277,11 +277,19 @@ The prototypes are the reference for layout. This section fixes the behaviour.
 | `GET /media/...` | Posters, previews and web MP4s, with HTTP range support for streaming |
 | `POST /api/downloads/zip` | Build a .zip of visits or a whole day, with its size given first |
 | `POST /api/retry/{clip_id}` | Retry a failed clip |
-| `GET/PUT /api/setup` | Camera address and password. The password goes into the Keychain. |
+| `GET/PUT /api/setup` | Camera address, password (goes into the Keychain) and edit PIN (stored as a salted hash). Local only. |
+| `POST /api/unlock` | Check the edit PIN and set the editor cookie |
+| `GET /api/me` | `{can_edit}`, so the gallery knows whether to show edit controls |
 
 **Access:**
 - The server listens on the home network only.
-- Phase 1 has **no login**, because only devices on the home Wi-Fi can reach it.
+- **Viewing is open** to anyone on the home Wi-Fi with no login: browse, watch and download. This lets the owner share the gallery with someone in the same house.
+- **Editing needs a 4-digit edit PIN.** That covers correcting species, moving between categories, favourites, undo, retry and deleting empty clips.
+  - The owner sets the PIN in Setup. It is stored only as a salted hash.
+  - A device unlocks once with `POST /api/unlock {pin}`, which sets a long-lived, HTTP-only cookie.
+  - Requests from the Mac itself never need the PIN.
+  - Five wrong PINs from a device lock unlocking for 15 minutes.
+- **On a locked device**, edit controls are hidden, not just disabled. The menu has a small "Unlock editing" entry instead.
 - The Setup screen and its API answer only to requests from the Mac itself.
 
 ## 11. Performance
