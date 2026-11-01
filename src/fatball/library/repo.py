@@ -38,6 +38,17 @@ class Clip:
     size_bytes: int
 
 
+@dataclass
+class Camera:
+    id: int
+    name: str
+    mac: str | None
+    last_ip: str | None
+    last_seen_at: datetime | None
+    last_error: str | None
+    clock_offset_s: float | None
+
+
 def _iso(dt: datetime) -> str:
     return dt.astimezone().isoformat()
 
@@ -52,11 +63,23 @@ def _clip(row: sqlite3.Row) -> Clip:
 def upsert_camera(conn: sqlite3.Connection, name: str, mac: str | None, ip: str | None) -> int:
     conn.execute(
         "INSERT INTO camera(name, mac, last_ip) VALUES (?, ?, ?) "
-        "ON CONFLICT(name) DO UPDATE SET mac = excluded.mac, last_ip = excluded.last_ip",
+        "ON CONFLICT(name) DO UPDATE SET mac = COALESCE(excluded.mac, mac), "
+        "last_ip = COALESCE(excluded.last_ip, last_ip)",
         (name, mac, ip),
     )
     conn.commit()
     return conn.execute("SELECT id FROM camera WHERE name = ?", (name,)).fetchone()[0]
+
+
+def get_camera(conn: sqlite3.Connection) -> Camera | None:
+    """The camera row (there is one camera); None before it has been set up."""
+    row = conn.execute("SELECT * FROM camera ORDER BY id LIMIT 1").fetchone()
+    if row is None:
+        return None
+    values = {f.name: row[f.name] for f in fields(Camera)}
+    if values["last_seen_at"] is not None:
+        values["last_seen_at"] = datetime.fromisoformat(values["last_seen_at"])
+    return Camera(**values)
 
 
 def update_camera_status(
@@ -67,8 +90,9 @@ def update_camera_status(
     last_ip=None,
     last_error=None,
     clock_offset_s=None,
+    clear_error: bool = False,
 ) -> None:
-    """Set the given fields; arguments left as None are not touched."""
+    """Set the given fields; arguments left as None are not touched. clear_error sets last_error NULL."""
     given = {
         "last_seen_at": _iso(last_seen_at) if isinstance(last_seen_at, datetime) else last_seen_at,
         "last_ip": last_ip,
@@ -76,6 +100,8 @@ def update_camera_status(
         "clock_offset_s": clock_offset_s,
     }
     updates = {k: v for k, v in given.items() if v is not None}
+    if clear_error:
+        updates["last_error"] = None
     if not updates:
         return
     assignments = ", ".join(f"{k} = ?" for k in updates)  # keys come from the fixed tuple above
@@ -100,6 +126,12 @@ def add_clip(
     )
     conn.commit()
     return cur.lastrowid if cur.rowcount else None
+
+
+def delete_clip(conn: sqlite3.Connection, clip_id: int) -> None:
+    """Remove a clip row (used to forget a download that did not complete, so it is retried)."""
+    conn.execute("DELETE FROM clip WHERE id = ?", (clip_id,))
+    conn.commit()
 
 
 def known_clip_keys(conn: sqlite3.Connection, day: date) -> set[tuple[str, datetime]]:

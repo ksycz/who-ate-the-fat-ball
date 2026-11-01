@@ -117,3 +117,30 @@ def test_list_clips_newest_first_with_cursor(conn, cam):
     nxt = repo.list_clips(conn, 2, page[-1].begin_at)
     assert [c.sd_path for c in nxt] == ["/c/2", "/c/1"]
     assert [c.sd_path for c in repo.list_clips(conn, 10, nxt[-1].begin_at)] == ["/c/0"]
+
+
+def test_update_camera_status_can_clear_error(conn, cam):
+    repo.update_camera_status(conn, cam, last_error="boom")
+    repo.update_camera_status(conn, cam, clear_error=True)
+    assert conn.execute("SELECT last_error FROM camera").fetchone()[0] is None
+
+
+def test_upsert_camera_keeps_stored_mac_and_ip_when_given_none(conn, cam):
+    assert repo.upsert_camera(conn, "feeder", None, None) == cam
+    assert tuple(conn.execute("SELECT mac, last_ip FROM camera").fetchone()) == ("aa:bb", "192.168.1.5")
+
+
+def test_get_camera_reads_the_row(conn):
+    assert repo.get_camera(conn) is None
+    cam = repo.upsert_camera(conn, "feeder", "aa:bb", "192.168.1.5")
+    repo.update_camera_status(conn, cam, last_seen_at=datetime(2026, 10, 30, 8, 0), clock_offset_s=1.5)
+    got = repo.get_camera(conn)
+    assert (got.id, got.name, got.mac, got.last_ip, got.last_error, got.clock_offset_s) == (
+        cam, "feeder", "aa:bb", "192.168.1.5", None, 1.5)
+    assert got.last_seen_at == datetime(2026, 10, 30, 8, 0).astimezone()
+
+
+def test_delete_clip(conn, cam):
+    clip_id = _add(conn, cam)
+    repo.delete_clip(conn, clip_id)
+    assert repo.list_clips(conn, 10, None) == []
