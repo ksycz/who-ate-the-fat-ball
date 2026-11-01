@@ -36,5 +36,5 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 110
-extend-exclude = ["design", "downloads", "camera_test.py", "download_test.py", "xm_convert.py"]
+extend-exclude = ["design", "local"]
 src = ["src", "tests"]

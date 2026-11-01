@@ -17,3 +17,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 dist/
+
+# Local prototype scripts and real-camera data (never committed)
+local/
