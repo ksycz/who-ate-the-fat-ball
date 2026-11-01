@@ -4,6 +4,7 @@ import argparse
 import getpass
 import ipaddress
 import logging
+import signal
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
@@ -31,6 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
     demo_p = sub.add_parser("demo", help="try the app with a fake camera full of generated clips")
+    demo_p.add_argument("--host", default="127.0.0.1",
+                        help="address to listen on (default: this Mac only; 0.0.0.0 for the LAN)")
     demo_p.add_argument("--port", type=int, default=8080)
     sub.add_parser("setup", help="set the camera password, the edit PIN and (optionally) the camera IP")
     return parser
@@ -44,7 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "serve":
         serve(Settings.load(), host=args.host, port=args.port)
     else:
-        run_demo(port=args.port)
+        run_demo(host=args.host, port=args.port)
     return 0
 
 
@@ -68,6 +71,21 @@ def _urls(host: str, port: int) -> list[str]:
     elif host not in ("127.0.0.1", "localhost", "::1"):
         urls.insert(0, f"http://{host}:{port}")
     return urls
+
+
+def _raise_keyboard_interrupt(signum, frame) -> None:
+    raise KeyboardInterrupt
+
+
+def _install_sigterm_as_keyboard_interrupt():
+    if threading.current_thread() is not threading.main_thread():
+        return None  # signal handlers can only be set from the main thread
+    return signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+
+
+def _restore_sigterm(previous) -> None:
+    if previous is not None and threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, previous)
 
 
 def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | None = None,
@@ -98,11 +116,16 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
 
     # proxy_headers=False: we never sit behind a proxy, so X-Forwarded-For must not make a client "local".
     config = uvicorn.Config(create_app(settings), host=host, port=port, proxy_headers=False)
+    # uvicorn shuts down gracefully on SIGTERM, then restores the previous handler and re-raises the
+    # signal. With the default handler that kills the process before our clean-up runs, so install one
+    # that turns SIGTERM into KeyboardInterrupt, like Ctrl-C (signal handlers run in the main thread).
+    previous_sigterm = _install_sigterm_as_keyboard_interrupt()
     try:
         uvicorn.Server(config).run()
     except KeyboardInterrupt:
         pass
     finally:
+        _restore_sigterm(previous_sigterm)
         watcher.stop()
         stop.set()
         for t in threads:
@@ -121,7 +144,7 @@ DEMO_BANNER = """
 """
 
 
-def run_demo(*, port: int, n_clips: int = 12, days: int = 2) -> None:
+def run_demo(*, host: str = "127.0.0.1", port: int, n_clips: int = 12, days: int = 2) -> None:
     print("Generating demo clips...")
     with tempfile.TemporaryDirectory(prefix="fatball-demo-") as tmp, \
             demo.build_demo_camera(n_clips=n_clips, days=days) as cam:
@@ -129,7 +152,7 @@ def run_demo(*, port: int, n_clips: int = 12, days: int = 2) -> None:
         conn = db.connect(settings.db_path)
         repo.upsert_camera(conn, CAMERA_NAME, None, "127.0.0.1")
         conn.close()
-        serve(settings, host="0.0.0.0", port=port, watcher_options=demo.watcher_options(),
+        serve(settings, host=host, port=port, watcher_options=demo.watcher_options(),
               banner=DEMO_BANNER.format(n=n_clips, days=days))
 
 

@@ -1,4 +1,10 @@
+import os
+import signal
+import socket
+import subprocess
+import sys
 import threading
+import time
 
 import pytest
 
@@ -22,6 +28,45 @@ def test_serve_defaults_listen_on_lan_port_8080():
     args = cli.build_parser().parse_args(["serve"])
     assert (args.host, args.port) == ("0.0.0.0", 8080)
     assert cli.build_parser().parse_args(["demo"]).port == 8080
+
+
+def test_demo_listens_on_this_mac_only_by_default():
+    assert cli.build_parser().parse_args(["demo"]).host == "127.0.0.1"
+    assert cli.build_parser().parse_args(["demo", "--host", "0.0.0.0"]).host == "0.0.0.0"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_sigterm_runs_the_shutdown_clean_up(tmp_path):
+    port = _free_port()
+    env = {**os.environ, "FATBALL_DATA_DIR": str(tmp_path / "data"), "PYTHONUNBUFFERED": "1",
+           # The child must never reach the real Keychain: with no password the watcher contacts nothing.
+           "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
+    cmd = [sys.executable, "-c", "import sys; from fatball.cli import main; sys.exit(main())",
+           "serve", "--host", "127.0.0.1", "--port", str(port)]
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline and proc.poll() is None:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            pytest.fail(f"server never listened: {proc.communicate(timeout=5)[0]}")
+        proc.send_signal(signal.SIGTERM)
+        out, _ = proc.communicate(timeout=8)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 0, out
+    assert "Stopped." in out
 
 
 class Prompts:
