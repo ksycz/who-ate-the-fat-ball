@@ -158,13 +158,39 @@ def clips_with_status(conn: sqlite3.Connection, status: str) -> list[Clip]:
     return [_clip(r) for r in rows]
 
 
-def list_clips(conn: sqlite3.Connection, limit: int, before: datetime | None) -> list[Clip]:
+def list_clips(
+    conn: sqlite3.Connection, limit: int, before: datetime | None, *, status: str | None = None
+) -> list[Clip]:
     """Newest first. `before` is an exclusive cursor on begin_at (pass the last clip's begin_at)."""
-    if before is None:
-        rows = conn.execute("SELECT * FROM clip ORDER BY begin_at DESC, id DESC LIMIT ?", (limit,))
-    else:
-        rows = conn.execute(
-            "SELECT * FROM clip WHERE begin_at < ? ORDER BY begin_at DESC, id DESC LIMIT ?",
-            (_iso(before), limit),
-        )
+    where, args = [], []
+    if before is not None:
+        where.append("begin_at < ?")
+        args.append(_iso(before))
+    if status is not None:
+        where.append("status = ?")
+        args.append(status)
+    clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
+    rows = conn.execute(f"SELECT * FROM clip {clause}ORDER BY begin_at DESC, id DESC LIMIT ?", (*args, limit))
     return [_clip(r) for r in rows]
+
+
+def queue_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """How many clips are waiting to be (or failed to be) processed."""
+    counts = {"downloaded": 0, "processing": 0, "failed": 0}
+    for r in conn.execute("SELECT status, COUNT(*) AS n FROM clip GROUP BY status"):
+        if r["status"] in counts:
+            counts[r["status"]] = r["n"]
+    return counts
+
+
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM setting WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO setting(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()

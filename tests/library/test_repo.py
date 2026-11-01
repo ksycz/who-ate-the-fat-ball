@@ -144,3 +144,29 @@ def test_delete_clip(conn, cam):
     clip_id = _add(conn, cam)
     repo.delete_clip(conn, clip_id)
     assert repo.list_clips(conn, 10, None) == []
+
+
+def test_queue_counts_only_pending_states(conn, cam):
+    for i, status in enumerate(["downloaded", "downloaded", "processing", "failed", "ready"]):
+        cid = _add(conn, cam, path=f"/p/{i}", begin=datetime(2026, 10, 30, 8, i, 0))
+        repo.set_clip_status(conn, cid, status)
+    assert repo.queue_counts(conn) == {"downloaded": 2, "processing": 1, "failed": 1}
+
+
+def test_queue_counts_empty(conn):
+    assert repo.queue_counts(conn) == {"downloaded": 0, "processing": 0, "failed": 0}
+
+
+def test_settings_get_set_overwrite(conn):
+    assert repo.get_setting(conn, "k") is None
+    repo.set_setting(conn, "k", "v1")
+    repo.set_setting(conn, "k", "v2")
+    assert repo.get_setting(conn, "k") == "v2"
+
+
+def test_list_clips_status_filter(conn, cam):
+    a = _add(conn, cam, path="/a", begin=datetime(2026, 10, 30, 8, 0, 0))
+    _add(conn, cam, path="/b", begin=datetime(2026, 10, 30, 9, 0, 0))
+    repo.set_clip_status(conn, a, "ready")
+    assert [c.id for c in repo.list_clips(conn, 10, None, status="ready")] == [a]
+    assert len(repo.list_clips(conn, 10, None)) == 2
