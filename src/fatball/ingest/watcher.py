@@ -27,7 +27,10 @@ log = logging.getLogger(__name__)
 
 CAMERA_NAME = "feeder"
 CAMERA_USER = "admin"
-YESTERDAY_GRACE = timedelta(minutes=10)  # clips that end just after midnight are filed under yesterday
+# A clip begun just before midnight is filed under yesterday but may only appear once it has been written,
+# so a clean tick counts as covering "now minus this" rather than now.
+LISTING_GRACE = timedelta(minutes=10)
+MAX_DOWNLOAD_FAILURES = 3
 KIND = "h264"
 
 
@@ -62,7 +65,8 @@ class Watcher:
         self._connect, self._now, self._sleep, self._find, self._password = connect, now, sleep, find, password
         self._client_timeout, self._silence_s = client_timeout, silence_s
         self._probe_timeout, self._discovery_interval_s = probe_timeout, discovery_interval_s
-        self._caught_up = False
+        self._covered_through: date | None = None  # files up to the start of this day are known
+        self._failures: dict[tuple[str, datetime], int] = {}
         self._backoff_until: datetime | None = None
         self._backoff_reason = "wrong_password"
         self._last_discovery: datetime | None = None
@@ -74,11 +78,20 @@ class Watcher:
             try:
                 self.tick()
             except Exception:  # keep polling whatever goes wrong in one tick
+                self._record_internal_error()
                 log.exception("watcher tick failed")
             self._sleep(self.settings.poll_interval_s)
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _record_internal_error(self) -> None:
+        try:
+            camera = repo.get_camera(self.conn)
+            if camera is not None:
+                repo.update_camera_status(self.conn, camera.id, last_error="internal_error")
+        except Exception:
+            log.exception("could not record the watcher error")
 
     def tick(self) -> TickResult:
         now = self._local_now()
@@ -109,11 +122,13 @@ class Watcher:
             with self._connect(host, self.settings.camera_port, self._client_timeout,
                                silence_s=self._silence_s) as client:
                 client.login(CAMERA_USER, password)
-                self._fix_clock(client, camera_id, now)
+                clock_ok = self._fix_clock(client, camera_id, now)
                 files = self._unknown_files(client, now)
                 for f in files:
                     downloaded += self._download(client, camera_id, f)
-                self._caught_up = True
+                self._covered_through = (now - LISTING_GRACE).date()
+                if not clock_ok:
+                    error = "clock_error"
         except (WrongPassword, AccountLocked) as e:
             error = "wrong_password" if isinstance(e, WrongPassword) else "account_locked"
             self._backoff_reason = error
@@ -162,27 +177,36 @@ class Watcher:
         log.info("camera rediscovered at %s", found)
         return found
 
-    def _fix_clock(self, client: XMClient, camera_id: int, now: datetime) -> None:
-        offset = (client.camera_time() - now).total_seconds()
-        if abs(offset) > self.settings.clock_tolerance_s:
-            log.info("camera clock off by %.0f s; setting it", offset)
-            client.set_time(now)
+    def _fix_clock(self, client: XMClient, camera_id: int, now: datetime) -> bool:
+        """Best effort (the time message ids are unverified on the real camera). False if it failed."""
+        try:
+            offset = (client.camera_time() - now).total_seconds()
+            if abs(offset) > self.settings.clock_tolerance_s:
+                log.info("camera clock off by %.0f s; setting it", offset)
+                client.set_time(self._local_now())
+                offset = 0.0  # the camera now matches our clock
+        except CameraUnreachable:
+            raise
+        except (CameraError, KeyError, ValueError, TypeError) as e:
+            log.warning("could not check or set the camera clock: %r", e)
+            return False
         repo.update_camera_status(self.conn, camera_id, clock_offset_s=offset)
+        return True
 
     def _days(self, now: datetime) -> list[date]:
+        """Every day since the last clean tick (all of the catch-up window before the first), newest first."""
         today = now.date()
-        if not self._caught_up:
-            return [today - timedelta(days=n) for n in range(self.settings.catchup_days + 1)]
-        days = [today]
-        if now - datetime.combine(today, datetime.min.time()) < YESTERDAY_GRACE:
-            days.append(today - timedelta(days=1))
-        return days
+        oldest = today - timedelta(days=self.settings.catchup_days)
+        if self._covered_through is not None:
+            oldest = max(oldest, min(self._covered_through, today))
+        return [today - timedelta(days=n) for n in range((today - oldest).days + 1)]
 
     def _unknown_files(self, client: XMClient, now: datetime) -> list[RemoteFile]:
         unknown: list[RemoteFile] = []
         for day in self._days(now):
             known = repo.known_clip_keys(self.conn, day)
-            unknown += [f for f in client.list_files(day, KIND) if (f.sd_path, f.begin) not in known]
+            unknown += [f for f in client.list_files(day, KIND) if (f.sd_path, f.begin) not in known
+                        and self._failures.get((f.sd_path, f.begin), 0) < MAX_DOWNLOAD_FAILURES]
         return sorted(unknown, key=lambda f: f.begin, reverse=True)
 
     def _download(self, client: XMClient, camera_id: int, f: RemoteFile) -> int:
@@ -200,6 +224,10 @@ class Watcher:
         except BaseException:
             repo.delete_clip(self.conn, clip_id)  # forget it so the next wake retries
             dest.unlink(missing_ok=True)
+            key = (f.sd_path, f.begin)
+            self._failures[key] = self._failures.get(key, 0) + 1
+            if self._failures[key] == MAX_DOWNLOAD_FAILURES:
+                log.warning("giving up on %s after %d failed downloads", f.sd_path, MAX_DOWNLOAD_FAILURES)
             raise
         repo.set_clip_status(self.conn, clip_id, "downloaded", raw_path=str(dest))
         log.info("downloaded %s (%d bytes) as clip %d", f.sd_path, size, clip_id)

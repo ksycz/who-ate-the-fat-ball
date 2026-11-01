@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from fatball.camera.client import XMClient
 from fatball.camera.fake import FakeFile
 from fatball.config import Settings
 from fatball.ingest import watcher as watcher_mod
@@ -88,18 +89,69 @@ def test_second_tick_only_downloads_new_files(tmp_path, conn, cam):
     assert sorted(c.begin_at.hour for c in _downloaded(conn)) == [9, 11]
 
 
-def test_yesterday_is_listed_until_ten_past_midnight(tmp_path, conn, cam):
+def test_clip_filed_under_yesterday_just_after_midnight_is_still_fetched(tmp_path, conn, cam):
     midnight = NOW.replace(hour=0, minute=0)
     clock = Clock(midnight + timedelta(minutes=1))
     cam.clock = clock.t
     w = _watcher(tmp_path, conn, cam, clock)
-    w.tick()
-    cam.add_file(_file(midnight - timedelta(seconds=40)))  # finished just before midnight
+    w.tick()  # catch-up
     clock.t = midnight + timedelta(minutes=5)
+    w.tick()  # clean tick shortly after midnight
+    cam.add_file(_file(midnight - timedelta(seconds=40)))  # finished being written just after midnight
+    clock.t = midnight + timedelta(minutes=6)
     assert w.tick().downloaded == 1
-    cam.add_file(_file(midnight - timedelta(minutes=5)))
-    clock.t = midnight + timedelta(minutes=11)
-    assert w.tick().downloaded == 0
+
+
+def test_lists_days_missed_while_mac_was_asleep(tmp_path, conn, cam):
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock)
+    assert w.tick().error is None  # clean tick on day D
+    cam.add_file(_file(NOW.replace(hour=9) + timedelta(days=1)))
+    clock.t = NOW + timedelta(days=2)
+    cam.clock = clock.t
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
+
+
+def test_file_failing_three_times_is_skipped_and_older_files_still_download(tmp_path, conn, cam):
+    poison = FakeFile(NOW.replace(hour=11), NOW.replace(hour=11, second=30), "h264", PAYLOAD, reported_kb=1000)
+    cam.add_file(poison)
+    cam.add_file(_file(NOW.replace(hour=9)))
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock)
+
+    for n in range(3):
+        clock.t = NOW + timedelta(seconds=5 * n)
+        assert w.tick() == TickResult(reachable=True, downloaded=0, error="download_interrupted")
+
+    clock.t = NOW + timedelta(seconds=15)
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
+    assert [c.begin_at.hour for c in repo.list_clips(conn, 10, None)] == [9]
+    assert list((tmp_path / "media" / "raw").glob("*.part")) == []
+
+
+def test_clock_query_failure_does_not_stop_downloads(tmp_path, conn, cam, monkeypatch):
+    def broken(self):
+        raise KeyError("OPTimeQuery")
+
+    monkeypatch.setattr(XMClient, "camera_time", broken)
+    cam.add_file(_file(NOW.replace(hour=9)))
+    w = _watcher(tmp_path, conn, cam, Clock(NOW))
+
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error="clock_error")
+    assert len(_downloaded(conn)) == 1
+    assert repo.get_camera(conn).last_error == "clock_error"
+
+
+def test_unexpected_tick_exception_is_recorded_and_polling_continues(tmp_path, conn, cam):
+    def connect(*a, **k):
+        raise RuntimeError("bug")
+
+    sleeps = []
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), connect=connect,
+                 sleep=lambda s: (sleeps.append(s), len(sleeps) == 2 and w.stop()))
+    w.run_forever()
+    assert len(sleeps) == 2
+    assert repo.get_camera(conn).last_error == "internal_error"
 
 
 def test_partial_download_is_discarded_and_retried(tmp_path, conn, cam):
@@ -129,12 +181,13 @@ def test_clock_fixed_when_off_by_more_than_two_minutes(tmp_path, conn, cam):
 
     w.tick()
     assert cam.set_time_calls == [NOW]
-    assert repo.get_camera(conn).clock_offset_s == 7 * 3600
+    assert repo.get_camera(conn).clock_offset_s == 0  # fixed
 
     cam.clock = NOW + timedelta(seconds=65)  # within tolerance: left alone
     clock.t = NOW + timedelta(seconds=5)
     w.tick()
     assert cam.set_time_calls == [NOW]
+    assert repo.get_camera(conn).clock_offset_s == 60
 
 
 def test_wrong_password_backs_off_ten_minutes(tmp_path, conn, cam):
