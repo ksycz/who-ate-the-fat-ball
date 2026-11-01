@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -98,3 +98,27 @@ def test_download_accepts_camera_size_overreport(fake_camera, tmp_path):
         assert f.size_kb * 1024 > len(payload)
         assert cam.download(f, dest) == len(payload)
     assert dest.read_bytes() == payload
+
+
+def test_list_files_pages_past_the_64_result_limit(fake_camera):
+    day = datetime(2026, 10, 30)
+    for i in range(150):
+        b = day + timedelta(minutes=5 * i, seconds=i % 3)
+        fake_camera.add_file(FakeFile(b, b + timedelta(seconds=10), "h264", b"x"))
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        files = cam.list_files(date(2026, 10, 30), "h264")
+    assert len(files) == 150
+    assert len({(f.sd_path, f.begin) for f in files}) == 150
+    assert sorted(f.begin for f in files) == sorted(f.begin for f in fake_camera.files)
+
+
+def test_list_files_stops_when_a_page_adds_nothing_new(fake_camera):
+    # 70 files sharing one begin second: re-querying from that second returns the same 64 forever.
+    b = datetime(2026, 10, 30, 9, 0, 0)
+    for i in range(70):
+        fake_camera.add_file(FakeFile(b, b + timedelta(seconds=10 + i), "h264", b"x"))
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        files = cam.list_files(date(2026, 10, 30), "h264")
+    assert len(files) == 64

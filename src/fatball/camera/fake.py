@@ -243,10 +243,12 @@ class FakeCamera:
         return encode(SESSION_ID, seq, LOGIN + 1, {"Ret": 100, "SessionID": f"0x{SESSION_ID:08X}"})
 
     def _query(self, q: dict) -> list[dict]:
-        day = q["BeginTime"][:10]
+        """Files that begin within [BeginTime, EndTime], oldest first, at most 64 (like the real camera)."""
+        lo = datetime.strptime(q["BeginTime"], _TIME_FMT)
+        hi = datetime.strptime(q["EndTime"], _TIME_FMT)
         with self._lock:
             hits = sorted((f for f in self.files if f.kind == q.get("Type", "h264")
-                           and f"{f.begin:%Y-%m-%d}" == day), key=lambda f: f.begin)
+                           and lo <= f.begin <= hi), key=lambda f: f.begin)
         return [{"BeginTime": f.begin.strftime(_TIME_FMT), "EndTime": f.end.strftime(_TIME_FMT),
                  "FileLength": f"0x{f.reported_kb if f.reported_kb is not None else -(-len(f.payload) // 1024):08X}", "FileName": f.sd_path,
                  "DiskNo": 0, "SerialNo": 0} for f in hits[:MAX_QUERY_RESULTS]]

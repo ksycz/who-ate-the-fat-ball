@@ -149,3 +149,16 @@ def test_context_manager_stops_server():
         port = cam.port
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
+
+
+def test_query_honours_time_of_day_bounds(fake_camera):
+    from fatball.camera.client import XMClient
+
+    for h in (6, 9, 12, 18):
+        b = datetime(2026, 10, 30, h)
+        fake_camera.add_file(FakeFile(b, b + timedelta(seconds=10), "h264", b"x"))
+    with XMClient("127.0.0.1", fake_camera.port, timeout=2.0) as c:
+        c.login("admin", "")
+        reply = c._request(FILE_QUERY, {"Name": "OPFileQuery", "SessionID": c._sid(), "OPFileQuery": {
+            "BeginTime": "2026-10-30 09:00:00", "EndTime": "2026-10-30 12:00:00", "Type": "h264"}})
+    assert [e["BeginTime"][11:13] for e in reply["OPFileQuery"]] == ["09", "12"]

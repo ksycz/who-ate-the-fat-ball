@@ -27,6 +27,7 @@ _WRONG_PASSWORD = {203, 205}
 _LOCKED = 206
 # The real camera's FileLength over-reports by ~1%, so a complete file can be a bit under size_kb*1024.
 MIN_COMPLETE_RATIO = 0.9
+QUERY_PAGE_SIZE = 64  # the camera returns at most this many files per query
 
 
 class CameraError(Exception):
@@ -141,9 +142,28 @@ class XMClient:
         return reply.get("SystemInfo", {})
 
     def list_files(self, day: date, kind: Literal["h264", "jpg"]) -> list[RemoteFile]:
+        """Every file of `kind` that began on `day`, oldest first.
+
+        The camera answers at most 64 entries per query (oldest first), so a full page is followed by
+        another query starting at the last entry's begin time (inclusive), de-duplicated on
+        (sd_path, begin), until a page is short or adds nothing new.
+        """
+        found: dict[tuple[str, datetime], RemoteFile] = {}
+        begin = f"{day:%Y-%m-%d} 00:00:00"
+        while True:
+            page = self._query_files(begin, f"{day:%Y-%m-%d} 23:59:59", kind)
+            new = [f for f in page if (f.sd_path, f.begin) not in found]
+            for f in new:
+                found[(f.sd_path, f.begin)] = f
+            if len(page) < QUERY_PAGE_SIZE or not new:
+                break
+            begin = page[-1].begin.strftime(_TIME_FMT)
+        return sorted(found.values(), key=lambda f: f.begin)
+
+    def _query_files(self, begin: str, end: str, kind: str) -> list[RemoteFile]:
         reply = self._request(FILE_QUERY, {
             "Name": "OPFileQuery",
-            "OPFileQuery": {"BeginTime": f"{day:%Y-%m-%d} 00:00:00", "EndTime": f"{day:%Y-%m-%d} 23:59:59",
+            "OPFileQuery": {"BeginTime": begin, "EndTime": end,
                             "Channel": 0, "DriverTypeMask": "0x0000FFFF", "Event": "*", "Type": kind},
             "SessionID": self._sid(),
         })

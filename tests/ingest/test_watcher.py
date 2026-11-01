@@ -286,3 +286,13 @@ def test_run_forever_ticks_and_sleeps_until_stopped(tmp_path, conn, cam):
                                                                    and w.stop()))
     w.run_forever()
     assert sleeps == [5.0, 5.0, 5.0]
+
+
+def test_more_than_64_clips_in_one_day_are_all_ingested(tmp_path, conn, cam):
+    start = NOW.replace(hour=6)
+    for i in range(70):
+        b = start + timedelta(minutes=4 * i)
+        cam.add_file(FakeFile(b, b + timedelta(seconds=8), "h264", b"c" * 1024))
+    w = _watcher(tmp_path, conn, cam, Clock(NOW))
+    assert w.tick() == TickResult(reachable=True, downloaded=70, error=None)
+    assert len(_downloaded(conn)) == 70
