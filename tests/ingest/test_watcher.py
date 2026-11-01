@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from fatball.camera.client import XMClient
+from fatball.camera.client import CameraError, XMClient
 from fatball.camera.fake import FakeFile
 from fatball.config import Settings
 from fatball.ingest import watcher as watcher_mod
@@ -112,20 +112,42 @@ def test_lists_days_missed_while_mac_was_asleep(tmp_path, conn, cam):
     assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
 
 
-def test_file_failing_three_times_is_skipped_and_older_files_still_download(tmp_path, conn, cam):
-    poison = FakeFile(NOW.replace(hour=11), NOW.replace(hour=11, second=30), "h264", PAYLOAD, reported_kb=1000)
-    cam.add_file(poison)
+def test_file_failing_three_times_is_skipped_and_older_files_still_download(tmp_path, conn, cam, monkeypatch):
+    real_download = XMClient.download
+
+    def download(self, f, dest):
+        if f.begin.hour == 11:
+            raise CameraError("unexpected reply")
+        return real_download(self, f, dest)
+
+    monkeypatch.setattr(XMClient, "download", download)
+    cam.add_file(_file(NOW.replace(hour=11)))
     cam.add_file(_file(NOW.replace(hour=9)))
     clock = Clock(NOW)
     w = _watcher(tmp_path, conn, cam, clock)
 
     for n in range(3):
         clock.t = NOW + timedelta(seconds=5 * n)
-        assert w.tick() == TickResult(reachable=True, downloaded=0, error="download_interrupted")
+        assert w.tick() == TickResult(reachable=True, downloaded=0, error="camera_error")
 
     clock.t = NOW + timedelta(seconds=15)
     assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
     assert [c.begin_at.hour for c in repo.list_clips(conn, 10, None)] == [9]
+
+
+def test_interrupted_downloads_never_mark_file_as_poison(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    cam.drop_after_bytes = 10_000
+    clock = Clock(NOW)
+    w = _watcher(tmp_path, conn, cam, clock)
+
+    for n in range(4):
+        clock.t = NOW + timedelta(seconds=5 * n)
+        assert w.tick() == TickResult(reachable=True, downloaded=0, error="download_interrupted")
+
+    cam.drop_after_bytes = None
+    clock.t = NOW + timedelta(seconds=20)
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
     assert list((tmp_path / "media" / "raw").glob("*.part")) == []
 
 

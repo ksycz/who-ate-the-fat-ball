@@ -221,13 +221,15 @@ class Watcher:
         dest = raw_dir / f"{clip_id}.raw"
         try:
             size = client.download(f, dest)
-        except BaseException:
+        except BaseException as e:
             repo.delete_clip(self.conn, clip_id)  # forget it so the next wake retries
             dest.unlink(missing_ok=True)
-            key = (f.sd_path, f.begin)
-            self._failures[key] = self._failures.get(key, 0) + 1
-            if self._failures[key] == MAX_DOWNLOAD_FAILURES:
-                log.warning("giving up on %s after %d failed downloads", f.sd_path, MAX_DOWNLOAD_FAILURES)
+            # The camera falling asleep mid-download is expected and never makes a file poison.
+            if isinstance(e, Exception) and not isinstance(e, (DownloadInterrupted, CameraUnreachable)):
+                key = (f.sd_path, f.begin)
+                self._failures[key] = self._failures.get(key, 0) + 1
+                if self._failures[key] == MAX_DOWNLOAD_FAILURES:
+                    log.warning("giving up on %s after %d failed downloads", f.sd_path, MAX_DOWNLOAD_FAILURES)
             raise
         repo.set_clip_status(self.conn, clip_id, "downloaded", raw_path=str(dest))
         log.info("downloaded %s (%d bytes) as clip %d", f.sd_path, size, clip_id)
