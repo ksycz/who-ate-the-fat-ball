@@ -104,3 +104,46 @@ def test_require_editor_without_auth_state_fails_closed():
         return 1
 
     assert TestClient(bare, client=LAN).get("/x").status_code == 403
+
+
+def test_concurrent_wrong_pins_get_at_most_five_401s(app, make_client):
+    import threading
+
+    _set_pin(make_client(LOCAL))
+    n = 20
+    barrier = threading.Barrier(n)
+    codes = []
+
+    def guess():
+        client = make_client(LAN)
+        barrier.wait()
+        codes.append(client.post("/api/unlock", json={"pin": "0000"}).status_code)
+
+    threads = [threading.Thread(target=guess) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert codes.count(401) <= 5
+    assert codes.count(401) + codes.count(429) == n
+
+
+def test_malformed_pin_hash_is_no_match_not_500(make_client, conn):
+    repo.set_setting(conn, "edit_pin_hash", "garbage")
+    assert make_client(LAN).post("/api/unlock", json={"pin": "1234"}).status_code == 401
+    repo.set_setting(conn, "edit_pin_hash", "scrypt$zz$zz")
+    assert make_client(LAN).post("/api/unlock", json={"pin": "1234"}).status_code == 401
+
+
+def test_setup_rejects_loopback_with_foreign_host_header(make_client):
+    c = make_client(LOCAL)
+    assert c.put("/api/setup", json={}, headers={"Host": "evil.example"}).status_code == 403
+    assert c.put("/api/setup", json={}, headers={"Host": "localhost:8000"}).status_code == 204
+    assert c.put("/api/setup", json={}, headers={"Host": "[::1]:8000"}).status_code == 204
+    assert c.get("/api/me", headers={"Host": "evil.example"}).json() == {"can_edit": False}
+
+
+def test_setup_rejects_loopback_with_foreign_origin(make_client):
+    c = make_client(LOCAL)
+    assert c.put("/api/setup", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
+    assert c.put("/api/setup", json={}, headers={"Origin": "http://localhost:5173"}).status_code == 204

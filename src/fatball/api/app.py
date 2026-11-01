@@ -53,7 +53,8 @@ def _media_url(path: str | None) -> str | None:
 def create_app(
     settings: Settings, conn: sqlite3.Connection, *, now: Callable[[], datetime] = _local_now
 ) -> FastAPI:
-    """`conn` may be shared with other threads; writes made here are serialised by a lock."""
+    """Build the API. Writes to `conn` made here hold a lock, but that only orders this app's own writes;
+    it does not make a connection shared with other code safe, so give the API its own connection."""
     app = FastAPI(title="Who Ate the Fat Ball?")
     lock = threading.Lock()
     auth = Auth(conn, lambda: now().astimezone(), lock)
@@ -95,9 +96,12 @@ def create_app(
     @app.get("/media/{path:path}")
     def media(path: str):
         root = settings.media_dir.resolve()
-        target = (root / path).resolve()
-        if not target.is_relative_to(root) or not target.is_file():
-            raise HTTPException(status_code=404)
+        try:
+            target = (root / path).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                raise HTTPException(status_code=404)
+        except (ValueError, OSError):
+            raise HTTPException(status_code=404) from None
         return FileResponse(target)  # Starlette answers Range requests with 206
 
     @app.put("/api/setup", status_code=204)
@@ -115,9 +119,10 @@ def create_app(
     @app.post("/api/unlock", status_code=204)
     def unlock(body: UnlockBody, request: Request, response: Response):
         ip = request.client.host if request.client else "unknown"
-        if auth.is_locked(ip):
-            raise HTTPException(status_code=429, detail="too many wrong PINs; try again later")
-        token = auth.try_unlock(ip, body.pin)
+        try:
+            token = auth.try_unlock(ip, body.pin)
+        except auth_mod.Locked:
+            raise HTTPException(status_code=429, detail="too many wrong PINs; try again later") from None
         if token is None:
             raise HTTPException(status_code=401, detail="wrong PIN")
         response.set_cookie(

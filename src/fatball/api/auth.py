@@ -12,6 +12,7 @@ import secrets as pysecrets
 import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
@@ -28,8 +29,35 @@ PIN_RE = re.compile(r"[0-9]{4}")  # ASCII digits only
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
 
+LOCAL_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class Locked(Exception):
+    """Too many wrong PINs from this IP."""
+
+
+def _hostname_is_local(value: str | None) -> bool:
+    try:
+        host = urlsplit(f"//{value}").hostname if value is not None else None
+    except ValueError:
+        return False
+    return host in LOCAL_NAMES
+
+
 def is_local(request: Request) -> bool:
-    return request.client is not None and request.client.host in LOCAL_HOSTS
+    """Client is the Mac itself, and the request names a local host (blocks DNS rebinding)."""
+    if request.client is None or request.client.host not in LOCAL_HOSTS:
+        return False
+    if not _hostname_is_local(request.headers.get("host")):
+        return False
+    origin = request.headers.get("origin")
+    if origin is not None:
+        try:
+            origin_host = urlsplit(origin).hostname
+        except ValueError:
+            return False
+        return origin_host in LOCAL_NAMES
+    return True
 
 
 def valid_pin_format(pin: str) -> bool:
@@ -51,6 +79,7 @@ class Auth:
         self.conn = conn
         self.now = now
         self.lock = lock
+        self._lockout_lock = threading.Lock()
         self._failures: dict[str, int] = {}
         self._locked_until: dict[str, datetime] = {}
 
@@ -65,27 +94,35 @@ class Auth:
         stored = repo.get_setting(self.conn, PIN_KEY)
         if not stored:
             return False
-        _, salt, digest = stored.split("$")
-        return hmac.compare_digest(_scrypt(pin, bytes.fromhex(salt)), bytes.fromhex(digest))
-
-    def is_locked(self, ip: str) -> bool:
-        until = self._locked_until.get(ip)
-        if until is None:
-            return False
-        if self.now() >= until:
-            del self._locked_until[ip]
-            self._failures.pop(ip, None)
-            return False
-        return True
+        try:
+            _, salt, digest = stored.split("$")
+            expected = bytes.fromhex(digest)
+            salt_bytes = bytes.fromhex(salt)
+        except ValueError:
+            return False  # malformed stored hash: no PIN can match
+        return hmac.compare_digest(_scrypt(pin, salt_bytes), expected)
 
     def try_unlock(self, ip: str, pin: str) -> str | None:
-        """A new editor token if the PIN is right, else None. Call only when not locked."""
+        """A new editor token if the PIN is right, None if wrong; raises Locked if the IP is locked out.
+
+        The attempt is counted as a failure *before* the (slow) hash check, under a dedicated lock, so
+        concurrent guesses cannot slip past the limit; a success clears the count.
+        """
+        with self._lockout_lock:
+            until = self._locked_until.get(ip)
+            if until is not None and self.now() >= until:
+                del self._locked_until[ip]
+                self._failures.pop(ip, None)
+            if self._failures.get(ip, 0) >= MAX_FAILURES:
+                raise Locked
+            self._failures[ip] = self._failures.get(ip, 0) + 1
+            if self._failures[ip] >= MAX_FAILURES:
+                self._locked_until[ip] = self.now() + LOCKOUT
         if valid_pin_format(pin) and self._pin_matches(pin):
-            self._failures.pop(ip, None)
+            with self._lockout_lock:
+                self._failures.pop(ip, None)
+                self._locked_until.pop(ip, None)
             return self._issue_token()
-        self._failures[ip] = self._failures.get(ip, 0) + 1
-        if self._failures[ip] >= MAX_FAILURES:
-            self._locked_until[ip] = self.now() + LOCKOUT
         return None
 
     def _issue_token(self) -> str:

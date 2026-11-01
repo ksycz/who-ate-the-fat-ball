@@ -144,3 +144,7 @@ def test_setup_password_never_in_db_or_logs(local, conn, caplog, stored_password
     assert secret_pw not in dump and secret_pw not in caplog.text
     assert pin not in caplog.text
     assert f"'{pin}'" not in dump
+
+
+def test_media_nul_byte_is_404_not_500(local):
+    assert local.get("/media/a%00b").status_code == 404

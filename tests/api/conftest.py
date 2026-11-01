@@ -64,7 +64,7 @@ def app(settings, conn, clock, stored_passwords):
 @pytest.fixture
 def make_client(app):
     def make(client=LOCAL):
-        return TestClient(app, client=client)
+        return TestClient(app, client=client, base_url="http://localhost")
 
     return make
 
