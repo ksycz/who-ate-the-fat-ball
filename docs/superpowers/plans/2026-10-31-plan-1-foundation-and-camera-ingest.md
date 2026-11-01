@@ -43,7 +43,10 @@ Bird recognition (Plan 2) and the gallery UI (Plan 3) build on this plan's inter
   - Never commit real footage or any camera identifier. Test video is generated with ffmpeg `testsrc`.
 - **Web copy:** H.264 MP4 (`libx264`, `-movflags +faststart`). The original H.265 file is kept.
 - **Network:**
-  - The API listens on the LAN with no login.
+  - The API listens on the LAN.
+  - **Viewing needs no login. Every data-changing endpoint needs the editor:** a request from `127.0.0.1` / `::1`, or a valid `fatball_editor` cookie from `POST /api/unlock`.
+  - The edit PIN is 4 digits, stored as a salted `hashlib.scrypt` hash in the `setting` table (key `edit_pin_hash`).
+  - Five wrong PINs from one client IP lock `/api/unlock` for 15 min for that IP.
   - `/api/setup` accepts requests only from `127.0.0.1` / `::1`.
 - **Never delete media automatically.**
 - **Git:** never push to GitHub unless the owner asks. Work on a feature branch and commit after every task.
@@ -335,7 +338,7 @@ def test_decode_payload_strips_terminator():
 ### Task 9: API
 
 **Files:**
-- Create: `src/fatball/api/app.py`, `tests/api/test_api.py`
+- Create: `src/fatball/api/app.py`, `src/fatball/api/auth.py`, `tests/api/test_api.py`, `tests/api/test_auth.py`
 
 **Interfaces:**
 - Consumes: `repo.*`, `Settings`, `secrets.set_password`
@@ -346,7 +349,13 @@ def test_decode_payload_strips_terminator():
     - `problem` means anything else, or any `last_error`.
   - `GET /api/clips?limit=50&before=<iso>` returns ready clips, newest first, with media URLs. Plan 3 replaces this with visit endpoints.
   - `GET /media/{path}` serves files from `media_dir` only and supports HTTP Range. It returns 404 for paths that try to escape `media_dir`.
-  - `PUT /api/setup` takes `{ip, password}` and stores the password through `secrets`. It answers **403 unless the request comes from the Mac itself**.
+  - `PUT /api/setup` takes `{ip, password, edit_pin}` (each optional). It stores the password through `secrets` and the PIN as a hash via `auth.set_edit_pin`. It answers **403 unless the request comes from the Mac itself**.
+  - `POST /api/unlock` takes `{pin}`.
+    - On success it returns 204 and sets the `fatball_editor` cookie: HttpOnly, SameSite=Strict, 400 days, value = a random token stored in `setting` key `editor_tokens`.
+    - On a wrong PIN it returns 401.
+    - After 5 failures from the same IP it returns 429 for 15 min.
+  - `GET /api/me` returns `{can_edit: bool}`.
+  - `auth.require_editor`: a FastAPI dependency that raises 403 unless the request is local or carries a valid cookie. Plan 2 uses it on every data-changing endpoint.
 
 - [ ] **Step 1: Write the failing tests** (FastAPI `TestClient`)
   - `test_status_ok_asleep_problem`: drive `last_seen_at` and `last_error`.
@@ -355,6 +364,10 @@ def test_decode_payload_strips_terminator():
   - `test_media_rejects_path_traversal`: `/media/../library.sqlite` gives a 404.
   - `test_setup_forbidden_from_lan_ip`: a client host of `192.168.1.50` gives a 403.
   - `test_setup_password_never_in_db_or_logs(caplog)`
+  - `test_unlock_right_pin_sets_cookie_and_me_can_edit`
+  - `test_unlock_wrong_pin_401_and_locks_after_five_for_15_min` (injected clock)
+  - `test_require_editor_allows_local_rejects_lan_without_cookie`
+  - `test_pin_stored_hashed_not_plaintext`
 - [ ] **Step 2: Run** `uv run pytest tests/api -v`. Expected: FAIL.
 - [ ] **Step 3: Implement.** Use `FileResponse`, or a small range handler if FastAPI's version can't do ranges.
 - [ ] **Step 4: Run** the same tests. Expected: PASS.
@@ -369,7 +382,7 @@ def test_decode_payload_strips_terminator():
 - Consumes: everything above
 - Produces:
   - `fatball serve [--host 0.0.0.0] [--port 8080]`: starts the Uvicorn API and runs `Watcher.run_forever` and a processor loop (every 2 s) in background threads.
-  - `fatball setup`: prompts with `getpass` and calls `secrets.set_password`.
+  - `fatball setup`: prompts with `getpass` for the camera password and the 4-digit edit PIN, then calls `secrets.set_password` and `auth.set_edit_pin`.
   - `fatball demo [--port 8080]` uses a temporary data dir. It starts a `FakeCamera` loaded with **12 generated clips over 2 days**, points the watcher at it, and serves the API, so the result looks exactly like real use.
   - `demo.build_demo_camera(n_clips: int, days: int) -> FakeCamera`
   - The `install-launchagent.sh` script writes `com.whoatethefatball.plist` (RunAtLoad, KeepAlive, logs in the data dir) and runs `launchctl bootstrap`.
