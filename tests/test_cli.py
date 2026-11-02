@@ -5,7 +5,9 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 
+import numpy as np
 import pytest
 
 from fatball import cli
@@ -15,6 +17,9 @@ from fatball.camera.protocol import sofia_hash
 from fatball.config import Settings
 from fatball.library import repo
 from fatball.library.db import connect
+from fatball.media.convert import FFMPEG
+from fatball.recognition.detector import Detection
+from fatball.recognition.fake import FakeDetector
 
 
 def test_cli_help_lists_all_commands(capsys):
@@ -22,7 +27,7 @@ def test_cli_help_lists_all_commands(capsys):
         cli.main(["--help"])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for command in ("serve", "demo", "setup", "set-camera-password"):
+    for command in ("serve", "demo", "setup", "set-camera-password", "examples-import"):
         assert command in out
 
 
@@ -195,3 +200,119 @@ def test_set_camera_password_refuses_when_the_saved_password_is_wrong(set_pw_cli
 
 def test_set_camera_password_needs_a_known_camera_ip(set_pw_cli):
     assert set_pw_cli(secret=[], ip=None) == (1, [])
+
+
+# examples-import
+GREAT_TIT = "Parus major"
+
+
+@pytest.fixture
+def library(tmp_path):
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.data_dir.mkdir()
+    conn = connect(settings.db_path)
+    repo.ensure_catalog(conn)
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    clips = []
+    for i in range(3):
+        begin = datetime(2026, 10, 30, 8 + i)
+        clip = repo.add_clip(conn, cam, f"/{i}.h265", begin, begin + timedelta(seconds=4), "video", 1)
+        conn.execute("UPDATE clip SET recognized_at = ? WHERE id = ?", (begin.isoformat(), clip))
+        for cls, conf in (("animal", 0.9), ("animal", 0.9), ("person", 0.9), ("animal", 0.1)):
+            conn.execute("INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature) "
+                         "VALUES (?, 0, ?, ?, 0, 0, 1, 1, ?)", (clip, cls, conf, b"\x00" * 8))
+        clips.append(clip)
+    conn.commit()
+    yield settings, conn, clips
+    conn.close()
+
+
+def _csv(tmp_path, *rows):
+    path = tmp_path / "labels.csv"
+    path.write_text("clip_id,label\n" + "".join(f"{c},{label}\n" for c, label in rows))
+    return path
+
+
+def _stored(conn):
+    return [tuple(r) for r in conn.execute("SELECT clip_id, label, label_source FROM detection ORDER BY id")]
+
+
+def _no_model():
+    return None
+
+
+def test_import_labels_animal_detections(library, tmp_path, capsys):
+    settings, conn, (a, b, c) = library
+    path = _csv(tmp_path, (a, "Great Tit"), (b, "dog"), (c, "nothing"))
+    assert cli.run_examples_import(settings, path, detector_loader=_no_model) == 0
+    assert capsys.readouterr().out.strip() == "6 examples from 3 clips"
+    rows = _stored(conn)
+    assert [r for r in rows if r[0] == a and r[1]] == [(a, GREAT_TIT, "import")] * 2
+    assert {r[1] for r in rows if r[0] == b} == {repo.DOG, None}
+    assert {r[1] for r in rows if r[0] == c} == {"nothing", None}
+    assert sum(r[1] is None for r in rows) == 6  # the person and the weak animal box stay unlabelled
+
+
+def test_import_rejects_unknown_name_and_writes_nothing(library, tmp_path, capsys):
+    settings, conn, (a, b, _) = library
+    path = _csv(tmp_path, (a, "great tit"), (b, "unicorn"), (999, "dog"))
+    assert cli.run_examples_import(settings, path, detector_loader=_no_model) == 1
+    out = capsys.readouterr().out
+    assert "unicorn" in out and "999" in out
+    assert all(r[1] is None for r in _stored(conn))
+
+
+def test_import_person_and_skip_add_nothing(library, tmp_path, capsys):
+    settings, conn, (a, b, _) = library
+    path = _csv(tmp_path, (a, "person"), (b, "skip"))
+    assert cli.run_examples_import(settings, path, detector_loader=_no_model) == 0
+    assert capsys.readouterr().out.strip() == "0 examples from 0 clips"
+    assert all(r[1] is None for r in _stored(conn))
+
+
+def test_import_twice_is_idempotent(library, tmp_path, capsys):
+    settings, conn, (a, b, _) = library
+    path = _csv(tmp_path, (a, "Parus major"), (b, "Passer domesticus"))
+    for _ in range(2):
+        assert cli.run_examples_import(settings, path, detector_loader=_no_model) == 0
+        assert capsys.readouterr().out.strip() == "4 examples from 2 clips"
+    assert sorted({(r[0], r[1]) for r in _stored(conn) if r[1]}) == [(a, GREAT_TIT), (b, "Passer domesticus")]
+
+
+def test_import_keeps_a_later_correction(library, tmp_path, capsys):
+    settings, conn, (a, _, _) = library
+    conn.execute("UPDATE detection SET label = 'Passer domesticus', label_source = 'correction' "
+                 "WHERE id = (SELECT MIN(id) FROM detection WHERE clip_id = ?)", (a,))
+    conn.commit()
+    assert cli.run_examples_import(settings, _csv(tmp_path, (a, "Parus major")), detector_loader=_no_model) == 0
+    assert capsys.readouterr().out.strip() == "1 examples from 1 clips"
+    assert {r[1:] for r in _stored(conn) if r[0] == a and r[1]} == {("Passer domesticus", "correction"),
+                                                                    (GREAT_TIT, "import")}
+
+
+def test_import_needing_recognition_without_a_model_writes_nothing(library, tmp_path, capsys):
+    settings, conn, (a, b, _) = library
+    conn.execute("UPDATE clip SET recognized_at = NULL WHERE id = ?", (b,))
+    conn.commit()
+    path = _csv(tmp_path, (a, "Parus major"), (b, "Parus major"))
+    assert cli.run_examples_import(settings, path, detector_loader=_no_model) == 1
+    assert f"{b}" in capsys.readouterr().out
+    assert all(r[1] is None for r in _stored(conn))
+
+
+def test_import_recognises_an_unrecognised_clip_first(library, tmp_path, capsys):
+    settings, conn, (a, _, _) = library
+    conn.execute("DELETE FROM detection WHERE clip_id = ?", (a,))
+    conn.execute("UPDATE clip SET recognized_at = NULL WHERE id = ?", (a,))
+    web = settings.media_dir / "clips" / str(a) / "web.mp4"
+    web.parent.mkdir(parents=True)
+    subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10",
+                    "-t", "2", "-pix_fmt", "yuv420p", str(web)], check=True)
+    repo.set_clip_status(conn, a, "ready", web_path=web.relative_to(settings.media_dir).as_posix())
+    detector = FakeDetector({1: [Detection("animal", 0.9, (0.2, 0.2, 0.6, 0.6))]})
+    features = lambda path, box: np.array([1.0, 0.0], dtype=np.float32)
+    code = cli.run_examples_import(settings, _csv(tmp_path, (a, "Parus major")),
+                                   detector_loader=lambda: detector, features=features)
+    assert code == 0
+    assert capsys.readouterr().out.strip() == "1 examples from 1 clips"
+    assert repo.is_recognized(conn, a)

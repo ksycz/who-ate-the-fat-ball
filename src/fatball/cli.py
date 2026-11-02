@@ -1,6 +1,7 @@
 """The `fatball` command: serve, setup, set-camera-password and demo."""
 
 import argparse
+import csv
 import getpass
 import ipaddress
 import logging
@@ -20,7 +21,10 @@ from fatball.ingest.processor import Processor
 from fatball.ingest.watcher import CAMERA_NAME, CAMERA_USER, Watcher
 from fatball.library import db, repo
 from fatball.recognition import qos
+from fatball.recognition.catalog import DOG
 from fatball.recognition.detector import MODEL_FILENAME
+from fatball.recognition.features import feature_print
+from fatball.recognition.recognizer import Recognizer
 
 log = logging.getLogger("fatball")
 
@@ -31,7 +35,7 @@ MIN_CAMERA_PASSWORD = 6
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fatball", description="Who Ate the Fat Ball? Bird-feeder camera app.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import}")
     serve = sub.add_parser("serve", help="run the camera watcher, the converter and the web app")
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
@@ -42,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("setup", help="set the camera password, the edit PIN and (optionally) the camera IP")
     sub.add_parser("set-camera-password",
                    help="give the camera a new password of your choice (so iCSee can't swap an empty one)")
+    imp = sub.add_parser("examples-import", help="label clips from a CSV (clip_id,label) to seed the examples")
+    imp.add_argument("csv", type=Path, help="CSV with the columns clip_id,label")
     return parser
 
 
@@ -51,6 +57,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_setup(Settings.load())
     if args.command == "set-camera-password":
         return run_set_camera_password(Settings.load())
+    if args.command == "examples-import":
+        settings = Settings.load()
+        return run_examples_import(settings, args.csv, detector_loader=model_loader(settings))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.command == "serve":
         serve(Settings.load(), host=args.host, port=args.port)
@@ -321,3 +330,85 @@ def run_set_camera_password(
     set_password(new)
     print("Done: the camera now uses your new password, and it's saved in the Keychain for the app.")
     return 0
+
+
+# examples-import
+NO_EXAMPLES = ("person", "skip")
+
+
+def run_examples_import(
+    settings: Settings,
+    csv_path: Path,
+    *,
+    detector_loader: Callable[[], object | None],
+    features: Callable = feature_print,
+) -> int:
+    """Label each listed clip's confident animal detections from a `clip_id,label` CSV.
+
+    Every row is checked first; on any problem nothing is written. Clips not yet recognised are recognised
+    first, which needs the detector."""
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if not {"clip_id", "label"} <= set(reader.fieldnames or ()):
+            print("The CSV needs the columns clip_id,label.")
+            return 1
+        rows = [(r["clip_id"].strip(), r["label"].strip()) for r in reader]
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = db.connect(settings.db_path)
+    try:
+        repo.ensure_catalog(conn)
+        wanted: dict[int, str | None] = {}  # clip id -> label to give (None: adds no examples); last row wins
+        errors: list[str] = []
+        for n, (raw_id, name) in enumerate(rows, start=2):
+            clip = repo.get_clip(conn, int(raw_id)) if raw_id.isdigit() else None
+            if clip is None:
+                errors.append(f"line {n}: unknown clip id {raw_id!r}")
+                continue
+            key = name.lower()
+            if key in NO_EXAMPLES:
+                label = None
+            elif key == "dog":
+                label = DOG
+            elif key == "nothing":
+                label = "nothing"
+            else:
+                label = repo.scientific_name_for(conn, name)
+                if label is None:
+                    errors.append(f"line {n}: unknown name {name!r}")
+                    continue
+            wanted[clip.id] = label
+        todo = [i for i, label in wanted.items() if label is not None and not repo.is_recognized(conn, i)]
+        for i in todo:
+            if not repo.get_clip(conn, i).web_path:
+                errors.append(f"clip {i} has no converted video to recognise")
+        if errors:
+            print("Nothing was written. Fix these and run it again:")
+            for e in errors:
+                print("  " + e)
+            return 1
+        recognizer = None
+        if todo:
+            try:
+                detector = detector_loader()
+            except Exception:
+                log.exception("detector failed to load")
+                detector = None
+            if detector is None:
+                print("These clips need recognising first, but the detector model isn't available "
+                      "(run scripts/export_detector.py). Nothing was written:")
+                print("  " + ", ".join(str(i) for i in todo))
+                return 1
+            recognizer = Recognizer(settings, conn, detector, features)
+        examples = clips = 0
+        for clip_id, label in wanted.items():
+            if label is None:
+                continue
+            if clip_id in todo:
+                recognizer.recognize(repo.get_clip(conn, clip_id))
+            n = repo.label_detections(conn, clip_id, label, "import")
+            examples += n
+            clips += n > 0
+        print(f"{examples} examples from {clips} clips")
+        return 0
+    finally:
+        conn.close()

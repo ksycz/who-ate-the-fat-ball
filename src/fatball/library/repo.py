@@ -15,7 +15,7 @@ from typing import Literal
 
 from fatball.recognition.catalog import CATALOG, DOG
 from fatball.recognition.features import from_blob
-from fatball.recognition.matcher import Example
+from fatball.recognition.matcher import DET_MIN, Example
 
 # downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
 Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
@@ -294,6 +294,48 @@ def set_recognition(
         "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL "
         "WHERE id = ?",
         (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
+    )
+    conn.commit()
+
+
+def get_clip(conn: sqlite3.Connection, clip_id: int) -> Clip | None:
+    row = conn.execute("SELECT * FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return _clip(row) if row is not None else None
+
+
+def is_recognized(conn: sqlite3.Connection, clip_id: int) -> bool:
+    row = conn.execute("SELECT recognized_at FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return row is not None and row["recognized_at"] is not None
+
+
+def scientific_name_for(conn: sqlite3.Connection, name: str) -> str | None:
+    """A catalog species' scientific name from its English name (any case) or its exact scientific name."""
+    row = conn.execute(
+        "SELECT s.scientific_name FROM species s LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+        "WHERE s.scientific_name = ? OR lower(n.name) = lower(?) LIMIT 1",
+        (name, name),
+    ).fetchone()
+    return row["scientific_name"] if row else None
+
+
+def label_detections(conn: sqlite3.Connection, clip_id: int, label: str, source: str) -> int:
+    """Label the clip's confident animal detections that have a feature; returns how many were labelled.
+
+    A detection the owner has corrected (label_source 'correction') is never overwritten."""
+    cur = conn.execute(
+        "UPDATE detection SET label = ?, labelled_at = ?, label_source = ? "
+        "WHERE clip_id = ? AND cls = 'animal' AND conf >= ? AND feature IS NOT NULL "
+        "AND (label_source IS NULL OR label_source != 'correction')",
+        (label, _iso(datetime.now()), source, clip_id, DET_MIN),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def unlabel_detections(conn: sqlite3.Connection, ids: list[int]) -> None:
+    conn.executemany(
+        "UPDATE detection SET label = NULL, labelled_at = NULL, label_source = NULL WHERE id = ?",
+        [(i,) for i in ids],
     )
     conn.commit()
 

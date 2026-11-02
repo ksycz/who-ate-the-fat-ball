@@ -207,3 +207,50 @@ def test_list_clips_status_filter(conn, cam):
     repo.set_clip_status(conn, a, "ready")
     assert [c.id for c in repo.list_clips(conn, 10, None, status="ready")] == [a]
     assert len(repo.list_clips(conn, 10, None)) == 2
+
+
+def _detection(conn, clip, cls="animal", conf=0.9, feature=b"\x00" * 8, label=None, source=None):
+    return conn.execute(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label, label_source) "
+        "VALUES (?, 0, ?, ?, 0, 0, 1, 1, ?, ?, ?)",
+        (clip, cls, conf, feature, label, source),
+    ).lastrowid
+
+
+def _labels(conn, clip):
+    return [(r["label"], r["label_source"]) for r in
+            conn.execute("SELECT label, label_source FROM detection WHERE clip_id = ? ORDER BY id", (clip,))]
+
+
+def test_label_detections_labels_only_confident_animals_with_features(conn, cam):
+    clip = _add(conn, cam)
+    _detection(conn, clip)
+    _detection(conn, clip, cls="person")
+    _detection(conn, clip, conf=0.1)
+    _detection(conn, clip, feature=None)
+    assert repo.label_detections(conn, clip, "Parus major", "import") == 1
+    assert _labels(conn, clip) == [("Parus major", "import"), (None, None), (None, None), (None, None)]
+
+
+def test_label_detections_never_overwrites_a_correction(conn, cam):
+    clip = _add(conn, cam)
+    _detection(conn, clip, label="Passer domesticus", source="correction")
+    _detection(conn, clip)
+    assert repo.label_detections(conn, clip, "Parus major", "import") == 1
+    assert _labels(conn, clip) == [("Passer domesticus", "correction"), ("Parus major", "import")]
+
+
+def test_unlabel_detections_clears_label_time_and_source(conn, cam):
+    clip = _add(conn, cam)
+    d = _detection(conn, clip)
+    repo.label_detections(conn, clip, "Parus major", "import")
+    repo.unlabel_detections(conn, [d])
+    row = conn.execute("SELECT label, labelled_at, label_source FROM detection WHERE id = ?", (d,)).fetchone()
+    assert tuple(row) == (None, None, None)
+
+
+def test_scientific_name_for_english_any_case_or_scientific(conn):
+    repo.ensure_catalog(conn)
+    assert repo.scientific_name_for(conn, "great tit") == "Parus major"
+    assert repo.scientific_name_for(conn, "Parus major") == "Parus major"
+    assert repo.scientific_name_for(conn, "unicorn") is None
