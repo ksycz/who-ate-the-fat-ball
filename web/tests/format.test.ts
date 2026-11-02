@@ -36,9 +36,10 @@ describe("durationText", () => {
 });
 
 describe("sureChip", () => {
-  it("rounds down, never 100%, null stays null", () => {
+  it("rounds to nearest, never 100%, null stays null", () => {
     expect(sureChip(0.94)).toBe("94% sure");
     expect(sureChip(0.999)).toBe("99% sure");
+    expect(sureChip(0.57)).toBe("57% sure");
     expect(sureChip(null)).toBeNull();
   });
 });

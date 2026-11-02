@@ -66,7 +66,7 @@ export function clipBadge(durationS: number, clipCount: number): string {
 
 export function sureChip(confidence: number | null): string | null {
   if (confidence === null) return null;
-  return `${Math.min(99, Math.floor(confidence * 100))}% sure`;
+  return `${Math.min(99, Math.round(confidence * 100))}% sure`;
 }
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
