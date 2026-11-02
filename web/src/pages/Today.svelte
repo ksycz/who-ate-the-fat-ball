@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getJSON, send, type Today } from "../lib/api";
-  import { canEdit } from "../lib/session";
+  import { canEdit, noteServerDay } from "../lib/session";
   import { clipBadge, speciesLabel, timeOfDay, visitTime, whenText } from "../lib/format";
   import { link } from "../lib/link";
   import Logo from "../components/Logo.svelte";
@@ -20,6 +20,7 @@
     try {
       data = await getJSON<Today>("/api/today");
       now = new Date();
+      noteServerDay(data.day);
     } catch {
       // keep what is on screen; the next refresh tries again
     }

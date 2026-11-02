@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { getJSON, type Status } from "../lib/api";
   import { route } from "../lib/router";
-  import { canEdit } from "../lib/session";
+  import { canEdit, noteServerDay } from "../lib/session";
   import { link } from "../lib/link";
   import Logo from "./Logo.svelte";
   import CameraStatus from "./CameraStatus.svelte";
@@ -14,6 +14,7 @@
   async function load() {
     try {
       status = await getJSON<Status>("/api/status");
+      noteServerDay(status.day);
       now = new Date();
     } catch {
       // the menu still works without counts

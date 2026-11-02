@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Visit from "../src/pages/Visit.svelte";
 import { route } from "../src/lib/router";
-import { canEdit, toast } from "../src/lib/session";
+import { canEdit, serverDay, toast } from "../src/lib/session";
 import type { Clip, Visit as VisitData } from "../src/lib/api";
 
 type Detail = VisitData & { clips: Clip[]; guesses: { scientific: string; name: string | null; confidence: number }[] };
@@ -51,6 +51,7 @@ function detail(over: Partial<Detail> = {}): Detail {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let current: Detail;
+let serverDayFromApi = "2026-11-03";
 function serve(data: Detail, patched?: Partial<Detail>) {
   current = data;
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -59,6 +60,7 @@ function serve(data: Detail, patched?: Partial<Detail>) {
       current = { ...current, ...patched };
       return new Response(JSON.stringify({ undo_token: "tok1" }), { status: 200 });
     }
+    if (url === "/api/status") return new Response(JSON.stringify({ day: serverDayFromApi }), { status: 200 });
     if (url === "/api/visits/5/watched") return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
   });
@@ -72,6 +74,7 @@ function video(): HTMLVideoElement {
 beforeEach(() => {
   canEdit.set(true);
   toast.set(null);
+  serverDay.set("2026-11-03");
   route.set({ name: "visit", params: { id: "5" } });
   vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
@@ -172,6 +175,28 @@ describe("Visit", () => {
     render(Visit);
     expect(await screen.findByText("Corrected by you")).toBeTruthy();
     expect(screen.queryByText("94% sure")).toBeNull();
+  });
+
+  it("uses_the_servers_day_for_the_time_prefix", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 12, 0));
+    serverDay.set(null);
+    serverDayFromApi = "2026-11-03";
+    serve(detail({ started_at: "2026-11-02T09:00:00+01:00", ended_at: "2026-11-02T09:02:10+01:00" }));
+    render(Visit);
+    expect(await screen.findByText(/Yesterday 09:00 · stayed 2 min/)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("escape_closes_download_menu_and_returns_focus", async () => {
+    serve(detail());
+    render(Visit);
+    const btn = await screen.findByRole("button", { name: /Download/ });
+    await fireEvent.click(btn);
+    screen.getByRole("link", { name: "Photo (.jpg)" }).focus();
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(btn);
   });
 
   it("clip_without_web_video_says_not_ready", async () => {

@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { ApiError, getJSON, send, type Category, type Clip, type Visit } from "../lib/api";
   import { route, back } from "../lib/router";
-  import { canEdit, showToast } from "../lib/session";
+  import { canEdit, noteServerDay, serverDay, showToast } from "../lib/session";
   import { speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "../components/Chip.svelte";
@@ -30,6 +30,7 @@
   let watchedSent = false;
   let player = $state<HTMLVideoElement | null>(null);
   let menuEl = $state<HTMLElement | null>(null);
+  let dlButton = $state<HTMLButtonElement | null>(null);
 
   const id = $derived($route.params.id);
 
@@ -53,9 +54,16 @@
   });
 
   const clip = $derived(visit?.clips[index] ?? null);
-  const today = $derived.by(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const today = $derived($serverDay ?? "");
+
+  $effect(() => {
+    if ($serverDay === null) {
+      getJSON<{ day: string }>("/api/status")
+        .then((s) => noteServerDay(s.day))
+        .catch(() => {
+          // show times without a day prefix until it is known
+        });
+    }
   });
   const alternatives = $derived(visit?.guesses.slice(1, 3) ?? []);
 
@@ -135,7 +143,10 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape" && menuOpen) menuOpen = false;
+    if (e.key === "Escape" && menuOpen) {
+      menuOpen = false;
+      dlButton?.focus();
+    }
   }
   function onOutside(e: MouseEvent) {
     if (menuOpen && menuEl && !menuEl.contains(e.target as Node)) menuOpen = false;
@@ -188,7 +199,7 @@
       </div>
       <div class="meta-row">
         <div class="meta">
-          {visitTime(visit.started_at, visit.ended_at, today)}
+          {#if $serverDay !== null}{visitTime(visit.started_at, visit.ended_at, today)}{/if}
           {#if !visit.corrected && sureChip(visit.confidence)}
             <Chip text={sureChip(visit.confidence) ?? ""} />
           {/if}
@@ -201,7 +212,7 @@
       </div>
       {#if alternatives.length > 0}
         <div class="maybe">
-          <span>Or maybe:</span>
+          <span>Or maybe</span>
           {#each alternatives as g (g.scientific)}
             {#if $canEdit}
               <button type="button" class="guess" disabled={busy} onclick={() => pick(g)}>{guessLabel(g)}</button>
@@ -221,7 +232,7 @@
         </button>
       {/if}
       <div class="dl" bind:this={menuEl}>
-        <button type="button" class="action" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}>
+        <button type="button" class="action" bind:this={dlButton} aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
           Download ▾
         </button>
