@@ -1,4 +1,5 @@
-"""Render the logo PNGs in web/public from the N4b tile (same shapes as design/logo.svg and Logo.svelte).
+"""Render the logo PNGs in web/public from the N4b tile: a robin-red rounded square with a white roof line over a round white face
+with two eyes and a beak (the same shapes as Logo.svelte).
 
     uv run python scripts/make_icons.py [SCRATCH_DIR]
 

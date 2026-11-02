@@ -145,10 +145,19 @@ class Seeder:
         self.conn.close()
 
 
+MARKER = ".fatball-e2e"
+
+
 def wipe(data_dir: Path) -> None:
+    """Empty `data_dir`, but only if it is missing, empty, or was seeded by this script before."""
+    if data_dir.resolve().name in ("", "WhoAteTheFatBall"):
+        sys.exit("refusing to wipe a data directory that looks like the real library")
+    if data_dir.exists() and any(data_dir.iterdir()) and not (data_dir / MARKER).exists():
+        sys.exit(f"refusing to wipe {data_dir}: it is not empty and has no {MARKER} file from an earlier e2e run")
     data_dir.mkdir(parents=True, exist_ok=True)
     for child in data_dir.iterdir():
         shutil.rmtree(child) if child.is_dir() else child.unlink()
+    (data_dir / MARKER).write_text("seeded by scripts/e2e_server.py\n")
 
 
 def build(args, bases: dict[str, ConvertedClip]) -> Settings:
@@ -166,9 +175,6 @@ def main() -> None:
     parser.add_argument("--empty", action="store_true")
     parser.add_argument("--camera-problem", action="store_true")
     args = parser.parse_args()
-    if args.data_dir.resolve().name in ("", "WhoAteTheFatBall"):
-        sys.exit("refusing to wipe a data directory that looks like the real library")
-
     from fatball.api.app import create_app
 
     work = Path(tempfile.mkdtemp(prefix="fatball-e2e-"))

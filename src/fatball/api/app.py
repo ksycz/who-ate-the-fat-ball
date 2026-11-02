@@ -163,10 +163,11 @@ def create_app(
         return clip.status == "failed" and bool(clip.raw_path) and (settings.media_dir / clip.raw_path).is_file()
 
     @app.get("/api/status")
-    def status(conn: Conn):
+    def status(conn: Conn, request: Request):
         free = shutil.disk_usage(settings.data_dir).free
         return {
             "day": now().astimezone().date().isoformat(),
+            "local": auth_mod.is_local(request),
             "camera": camera_json(conn),
             "sorted": repo.sorted_counts(conn),
             "queue": repo.queue_counts(conn),
@@ -339,7 +340,7 @@ def create_app(
 
     @app.get("/{path:path}", include_in_schema=False)
     def gallery(path: str):
-        if path.split("/")[0] in ("api", "media"):
+        if "\0" in path or path.split("/")[0] in ("api", "media"):
             raise HTTPException(status_code=404)
         # Root files from web/public (manifest, service worker, icons); never anything outside the static dir.
         if path and "/" not in path:
@@ -349,7 +350,7 @@ def create_app(
         index = static_root / "index.html"
         if not index.is_file():
             return PlainTextResponse(NOT_BUILT, status_code=503)
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})  # a stale shell would pin old assets
 
     return app
 

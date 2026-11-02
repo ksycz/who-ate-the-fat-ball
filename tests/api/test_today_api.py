@@ -160,3 +160,8 @@ def test_retry_failed_clip_without_raw_is_409(local, conn, cam):
     repo.set_clip_status(conn, cid, "failed", raw_path="raw/gone.raw")
     assert local.post(f"/api/retry/{cid}").status_code == 409
     assert repo.get_clip(conn, cid).status == "failed"
+
+
+def test_status_says_whether_the_request_is_from_the_mac(local, lan):
+    assert local.get("/api/status").json()["local"] is True
+    assert lan.get("/api/status").json()["local"] is False

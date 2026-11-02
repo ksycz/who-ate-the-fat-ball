@@ -84,3 +84,18 @@ def test_missing_root_file_and_traversal_fall_back_to_the_gallery(settings, tmp_
     assert "gallery" in c.get("/nothing.png").text
     assert "gallery" in c.get("/..%2Fsecret.png").text
     assert b"secret" not in c.get("/../secret.png").content
+
+
+def test_index_is_never_cached(settings, tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>gallery</html>")
+    r = _client(settings, static).get("/birds")
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_nul_in_path_is_404_not_500(settings, tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>gallery</html>")
+    assert _client(settings, static).get("/%00").status_code == 404

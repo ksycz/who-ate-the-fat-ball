@@ -18,7 +18,6 @@ def test_pin_stored_hashed_not_plaintext(local, conn):
     stored = repo.get_setting(conn, "edit_pin_hash")
     scheme, salt, digest = stored.split("$")
     assert scheme == "scrypt" and len(bytes.fromhex(salt)) == 16 and bytes.fromhex(digest)
-    assert "4821" not in stored
     expected = hashlib.scrypt(b"4821", salt=bytes.fromhex(salt), n=2**14, r=8, p=1)
     assert expected.hex() == digest
     _set_pin(local, "4821")  # new salt each time

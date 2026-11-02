@@ -483,8 +483,10 @@ def list_visits(
     day: date | None = None,
     favourite: bool | None = None,
 ) -> list[sqlite3.Row]:
-    """Visits newest first (`favourite` keeps only starred or only unstarred ones). `after` is the (started_at, id) of the last visit already seen; `day` is the
-    local date of started_at (stored as local-time ISO text, like clips)."""
+    """Visits newest first (`favourite` keeps only starred or only unstarred ones).
+
+    `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
+    (stored as local-time ISO text, like clips)."""
     where, args = [], []
     if after is not None:
         where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
