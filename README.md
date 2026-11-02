@@ -105,9 +105,13 @@ Do these in order the first time:
    ```
 
    Clips in the CSV that haven't been recognised yet are recognised first and put into visits. If one of them fails, nothing is labelled and the command tells you which clip it was.
-3. **Serve** with `uv run fatball serve`. The backfill then works through the older clips one at a time, using your examples.
+3. **Serve** with `uv run fatball serve`. New clips are recognised as they arrive; older ones stay plain videos until you ask.
 
 Recognition waits while there are no examples at all. Clips still convert and play, they just stay "pending" (`/api/status` shows `recognition.examples`). Without that wait, every clip would be filed as an unknown bird and never looked at again. Correcting a visit (`PATCH /api/visits/{id}`) also adds examples.
+
+### Older clips: only when you ask
+
+Only new clips are recognised by default; `/api/status` shows `recognition.old_waiting` for the older ones. Recognise some now with `uv run fatball recognize-old --limit 20` (add `--newest-first` to start from the latest; Ctrl-C stops after the current clip), or let the app work through all of them slowly in the background with `uv run fatball recognize-old --background on` (`off` turns it back off). Retrying a clip always recognises it.
 
 ### Your library is backed up before an upgrade
 

@@ -77,7 +77,7 @@ class Processor:
 
     def process_pending(self) -> int:
         """Convert every downloaded clip (recognising each before it becomes ready), then recognise at most
-        one older ready clip (the backfill). Returns how many clips were attempted for conversion.
+        one older ready clip (the backfill: only clips the owner asked for, unless `recognize_old_clips` is on). Returns how many clips were attempted for conversion.
 
         Each clip is claimed atomically just before converting and re-read by id, so a clip someone
         else claimed is skipped and the raw_path used is the one stored now, not the listing's.
@@ -101,7 +101,8 @@ class Processor:
                 self._recognize(recognizer, dataclasses.replace(clip, **paths))
             repo.set_clip_status(self.conn, clip.id, "ready", **paths)
         if recognizer is not None:
-            for clip in repo.clips_needing_recognition(self.conn, 1):
+            wanted_only = not repo.recognize_old_clips(self.conn)
+            for clip in repo.clips_needing_recognition(self.conn, 1, wanted_only=wanted_only):
                 self._recognize(recognizer, clip)
         return attempted
 

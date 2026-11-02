@@ -217,6 +217,7 @@ def test_downloaded_clip_is_recognised_and_in_a_visit(settings, conn, xm_clip_by
 
 def test_backfill_does_one_clip_per_pass_oldest_first(settings, conn):
     _teach_great_tit(conn)
+    repo.set_setting(conn, "recognize_old_clips", "on")
     late, early, mid = _ready_clip(conn, 15), _ready_clip(conn, 8), _ready_clip(conn, 11)
     stub = StubRecognizer(conn)
     p = Processor(settings, conn, stub)
@@ -241,6 +242,7 @@ def test_recognition_error_keeps_clip_playable(settings, conn, xm_clip_bytes, ca
 
 def test_failed_clip_is_skipped_by_later_passes(settings, conn):
     _teach_great_tit(conn)
+    repo.set_setting(conn, "recognize_old_clips", "on")
     bad, good = _ready_clip(conn, 8), _ready_clip(conn, 9)
     stub = StubRecognizer(conn, fail=[bad])
     p = Processor(settings, conn, stub)
@@ -265,9 +267,10 @@ def test_no_examples_keeps_clips_ready_and_pending(settings, conn, xm_clip_bytes
     assert p.process_pending() == 1
     assert _get(conn, clip_id).status == "ready"
     assert _recognition(conn, clip_id) == (None, None) and repo.visit_for_clip(conn, clip_id) is None
-    assert repo.recognition_counts(conn)["pending"] == 1
+    assert repo.recognition_counts(conn)["old_waiting"] == 1
     _teach_great_tit(conn)
-    p.process_pending()  # the backfill picks it up once there is an example
+    repo.requeue_recognition(conn, clip_id)  # asked for, so it is recognised once there is an example
+    p.process_pending()
     visit_id = repo.visit_for_clip(conn, clip_id)
     assert visit_id is not None
     assert conn.execute("SELECT s.scientific_name FROM visit v JOIN species s ON s.id = v.species_id "
@@ -277,6 +280,7 @@ def test_no_examples_keeps_clips_ready_and_pending(settings, conn, xm_clip_bytes
 def test_model_appearing_later_starts_recognition(settings, conn, xm_clip_bytes, caplog):
     _teach_great_tit(conn)
     clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    repo.set_setting(conn, "recognize_old_clips", "on")  # converted before any model, so it is "old"
     detectors = [None, None, _bird_detector()]
     p = Processor(settings, conn, detector_loader=lambda: detectors.pop(0), features=lambda path, box: BIRD)
     with caplog.at_level(logging.WARNING):
@@ -307,4 +311,55 @@ def test_photos_are_never_recognised(settings, conn, monkeypatch):
     stub = StubRecognizer(conn)
     Processor(settings, conn, stub).process_pending()
     assert _get(conn, clip_id).status == "ready" and stub.seen == []
-    assert repo.recognition_counts(conn) == {"pending": 0, "errors": 0}
+    assert repo.recognition_counts(conn) == {"pending": 0, "old_waiting": 0, "errors": 0}
+
+
+def test_old_clips_wait_by_default(settings, conn, xm_clip_bytes):
+    _teach_great_tit(conn)
+    old = _ready_clip(conn, 8)
+    new, _ = _clip(conn, settings, xm_clip_bytes)
+    stub = StubRecognizer(conn)
+    Processor(settings, conn, stub).process_pending()
+    Processor(settings, conn, stub).process_pending()
+    assert stub.seen == [new]
+    assert _recognition(conn, old) == (None, None) and repo.visit_for_clip(conn, old) is None
+
+
+def test_background_setting_on_recognises_old_clips(settings, conn):
+    _teach_great_tit(conn)
+    old = _ready_clip(conn, 8)
+    stub = StubRecognizer(conn)
+    p = Processor(settings, conn, stub)
+    p.process_pending()
+    assert stub.seen == []
+    repo.set_setting(conn, "recognize_old_clips", "on")
+    p.process_pending()
+    assert stub.seen == [old]
+    repo.set_setting(conn, "recognize_old_clips", "off")
+    later = _ready_clip(conn, 9)
+    p.process_pending()
+    assert stub.seen == [old]  # off again: later is left waiting
+    assert _recognition(conn, later) == (None, None)
+
+
+def test_retry_is_recognised_with_backfill_off(settings, conn):
+    _teach_great_tit(conn)
+    asked, other = _ready_clip(conn, 9), _ready_clip(conn, 8)
+    assert repo.requeue_recognition(conn, asked)
+    stub = StubRecognizer(conn)
+    p = Processor(settings, conn, stub)
+    p.process_pending()
+    p.process_pending()
+    assert stub.seen == [asked]
+    assert _recognition(conn, asked)[0] is not None
+    assert conn.execute("SELECT recognition_wanted FROM clip WHERE id = ?", (asked,)).fetchone()[0] == 0
+    assert _recognition(conn, other) == (None, None)
+
+
+def test_a_wanted_clip_that_fails_is_not_wanted_any_more(settings, conn):
+    _teach_great_tit(conn)
+    bad = _ready_clip(conn, 8)
+    repo.requeue_recognition(conn, bad)
+    Processor(settings, conn, StubRecognizer(conn, fail=[bad])).process_pending()
+    assert conn.execute("SELECT recognition_wanted FROM clip WHERE id = ?", (bad,)).fetchone()[0] == 0
+    assert _recognition(conn, bad)[1] is not None

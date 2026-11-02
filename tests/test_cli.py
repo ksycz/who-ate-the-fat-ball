@@ -386,3 +386,102 @@ def test_import_runs_at_background_priority(library, tmp_path, monkeypatch, caps
     monkeypatch.setattr(cli.qos, "set_background_priority", lambda: calls.append(1) or True)
     assert cli.run_examples_import(settings, _csv(tmp_path, (a, "Parus major")), detector_loader=_no_model) == 0
     assert calls == [1]
+
+
+# recognize-old
+def _old_clips(settings, conn, n=3):
+    """n converted, unrecognised videos (oldest first by id) and one example to match, on a held-back clip."""
+    cam = repo.get_camera(conn).id
+    holder = repo.add_clip(conn, cam, "/examples", datetime(2026, 9, 1), datetime(2026, 9, 1), "video", 1)
+    conn.execute("INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label) "
+                 "VALUES (?, 0, 'animal', 0.9, 0, 0, 1, 1, ?, ?)",
+                 (holder, np.array([1.0, 0.0], dtype=np.float32).tobytes(), GREAT_TIT))
+    conn.commit()
+    ids = []
+    for i in range(n):
+        begin = datetime(2026, 10, 1 + i, 9)
+        clip = repo.add_clip(conn, cam, f"/o{i}", begin, begin, "h264", 1)
+        web = settings.media_dir / "clips" / str(clip) / "web.mp4"
+        web.parent.mkdir(parents=True)
+        subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=10",
+                        "-t", "1", "-pix_fmt", "yuv420p", str(web)], check=True)
+        repo.set_clip_status(conn, clip, "ready", web_path=web.relative_to(settings.media_dir).as_posix())
+        ids.append(clip)
+    return ids
+
+
+def _bird_loader():
+    detector = FakeDetector({1: [Detection("animal", 0.9, (0.2, 0.2, 0.6, 0.6))]})
+    return lambda: detector
+
+
+_bird_features = lambda path, box: np.array([1.0, 0.0], dtype=np.float32)
+
+
+def _recognized_ids(conn):
+    return {r[0] for r in conn.execute("SELECT id FROM clip WHERE recognized_at IS NOT NULL")}
+
+
+def test_recognize_old_limit_recognises_oldest_n(library, capsys):
+    settings, conn, _ = library
+    old = _old_clips(settings, conn)
+    assert cli.run_recognize_old(settings, limit=2, detector_loader=_bird_loader(), features=_bird_features) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith(f"[1/2] clip {old[0]}: great tit (")
+    assert out[1].startswith(f"[2/2] clip {old[1]}: ")
+    assert out[-1] == "2 recognised, 0 failed, 1 old clips still waiting"
+    assert {old[0], old[1]} <= _recognized_ids(conn) and old[2] not in _recognized_ids(conn)
+
+
+def test_recognize_old_newest_first_picks_newest(library, capsys):
+    settings, conn, _ = library
+    old = _old_clips(settings, conn)
+    assert cli.run_recognize_old(settings, limit=1, newest_first=True, detector_loader=_bird_loader(),
+                                 features=_bird_features) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "1 recognised, 0 failed, 2 old clips still waiting"
+    assert old[2] in _recognized_ids(conn) and not ({old[0], old[1]} & _recognized_ids(conn))
+
+
+def test_recognize_old_counts_failures(library, capsys):
+    settings, conn, _ = library
+    _old_clips(settings, conn, n=1)
+    assert cli.run_recognize_old(settings, limit=1, detector_loader=lambda: BrokenDetector(),
+                                 features=_bird_features) == 0
+    out = capsys.readouterr().out
+    assert "model blew up" in out and out.splitlines()[-1] == "0 recognised, 1 failed, 0 old clips still waiting"
+
+
+def test_recognize_old_without_examples_exits_1(library, capsys):
+    settings, conn, _ = library
+    cam = repo.get_camera(conn).id
+    clip = repo.add_clip(conn, cam, "/x", datetime(2026, 10, 1), datetime(2026, 10, 1), "h264", 1)
+    repo.set_clip_status(conn, clip, "ready", web_path="clips/x/web.mp4")
+    assert cli.run_recognize_old(settings, limit=1, detector_loader=_bird_loader()) == 1
+    assert "no examples" in capsys.readouterr().out
+    assert clip not in _recognized_ids(conn)
+
+
+def test_recognize_old_without_the_model_exits_1(library, capsys):
+    settings, conn, _ = library
+    _old_clips(settings, conn, n=1)
+    assert cli.run_recognize_old(settings, limit=1, detector_loader=_no_model) == 1
+    assert "model" in capsys.readouterr().out
+
+
+def test_recognize_old_background_toggle(library, capsys):
+    settings, conn, _ = library
+    assert repo.get_setting(conn, "recognize_old_clips") is None
+    assert cli.run_recognize_old(settings, background="on", detector_loader=_no_model) == 0
+    assert "on" in capsys.readouterr().out
+    assert repo.get_setting(conn, "recognize_old_clips") == "on"
+    assert cli.run_recognize_old(settings, background="off", detector_loader=_no_model) == 0
+    assert repo.get_setting(conn, "recognize_old_clips") == "off"
+
+
+def test_recognize_old_arguments():
+    parse = cli.build_parser().parse_args
+    assert parse(["recognize-old", "--limit", "5", "--newest-first"]).newest_first is True
+    assert parse(["recognize-old", "--background", "on"]).background == "on"
+    for bad in (["--limit", "0"], ["--limit", "2", "--background", "on"], [], ["--background", "maybe"]):
+        with pytest.raises(SystemExit):
+            parse(["recognize-old", *bad])

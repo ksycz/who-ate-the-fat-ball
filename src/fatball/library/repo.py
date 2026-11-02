@@ -317,8 +317,8 @@ def set_recognition(
     conn: sqlite3.Connection, clip_id: int, *, best_frame_path: str | None, verdict_json: str, recognized_at: datetime
 ) -> None:
     conn.execute(
-        "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL "
-        "WHERE id = ?",
+        "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL, "
+        "recognition_wanted = 0 WHERE id = ?",
         (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
     )
     conn.commit()
@@ -372,29 +372,42 @@ def visit_for_clip(conn: sqlite3.Connection, clip_id: int) -> int | None:
     return row["visit_id"] if row else None
 
 
-def clips_needing_recognition(conn: sqlite3.Connection, limit: int) -> list[Clip]:
-    """Ready videos not yet recognised and not failed at it, oldest first. Photos have no video, so never."""
-    rows = conn.execute(
-        "SELECT * FROM clip WHERE status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL "
-        "AND recognition_error IS NULL ORDER BY begin_at, id LIMIT ?",
-        (limit,),
-    )
+RECOGNIZE_OLD_KEY = "recognize_old_clips"
+_NEEDS_RECOGNITION = "status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL AND recognition_error IS NULL"
+
+
+def recognize_old_clips(conn: sqlite3.Connection) -> bool:
+    """Whether the processor works through older unrecognised clips by itself (the setting, off when absent)."""
+    return get_setting(conn, RECOGNIZE_OLD_KEY) == "on"
+
+
+def clips_needing_recognition(
+    conn: sqlite3.Connection, limit: int, *, wanted_only: bool = False, newest_first: bool = False
+) -> list[Clip]:
+    """Ready videos not yet recognised and not failed at it, oldest first (newest first on request), or only
+    those the owner asked for. Photos have no video, so never."""
+    where = _NEEDS_RECOGNITION + (" AND recognition_wanted = 1" if wanted_only else "")
+    order = "begin_at DESC, id DESC" if newest_first else "begin_at, id"
+    rows = conn.execute(f"SELECT * FROM clip WHERE {where} ORDER BY {order} LIMIT ?", (limit,))
     return [_clip(r) for r in rows]
 
 
 def set_recognition_error(conn: sqlite3.Connection, clip_id: int, message: str) -> None:
-    conn.execute("UPDATE clip SET recognition_error = ? WHERE id = ?", (message, clip_id))
+    conn.execute("UPDATE clip SET recognition_error = ?, recognition_wanted = 0 WHERE id = ?", (message, clip_id))
     conn.commit()
 
 
 def recognition_counts(conn: sqlite3.Connection) -> dict[str, int]:
-    """pending: ready videos waiting to be recognised; errors: clips whose recognition failed."""
+    """pending: ready videos the processor will recognise (the ones asked for, and every older one while the
+    setting is on); old_waiting: older ones that wait until asked for; errors: clips whose recognition failed."""
     row = conn.execute(
-        "SELECT COALESCE(SUM(status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL "
-        "AND recognition_error IS NULL), 0) AS pending, "
+        f"SELECT COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 1), 0) AS wanted, "
+        f"COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 0), 0) AS old, "
         "COALESCE(SUM(recognition_error IS NOT NULL), 0) AS errors FROM clip"
     ).fetchone()
-    return {"pending": row["pending"], "errors": row["errors"]}
+    if recognize_old_clips(conn):
+        return {"pending": row["wanted"] + row["old"], "old_waiting": 0, "errors": row["errors"]}
+    return {"pending": row["wanted"], "old_waiting": row["old"], "errors": row["errors"]}
 
 
 def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
@@ -407,8 +420,12 @@ def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
 
 
 def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
-    """Clear both recognition markers so the backfill picks the clip up again; False for an unknown clip."""
-    cur = conn.execute("UPDATE clip SET recognition_error = NULL, recognized_at = NULL WHERE id = ?", (clip_id,))
+    """Clear both recognition markers and mark the clip wanted, so the processor recognises it again even with
+    the backfill off; False for an unknown clip."""
+    cur = conn.execute(
+        "UPDATE clip SET recognition_error = NULL, recognized_at = NULL, recognition_wanted = 1 WHERE id = ?",
+        (clip_id,),
+    )
     conn.commit()
     return cur.rowcount == 1
 

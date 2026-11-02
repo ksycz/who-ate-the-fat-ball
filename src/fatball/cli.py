@@ -9,6 +9,7 @@ import signal
 import sqlite3
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ MIN_CAMERA_PASSWORD = 6
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fatball", description="Who Ate the Fat Ball? Bird-feeder camera app.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import,recognize-old}")
     serve = sub.add_parser("serve", help="run the camera watcher, the converter and the web app")
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
@@ -49,7 +50,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="give the camera a new password of your choice (so iCSee can't swap an empty one)")
     imp = sub.add_parser("examples-import", help="label clips from a CSV (clip_id,label) to seed the examples")
     imp.add_argument("csv", type=Path, help="CSV with the columns clip_id,label")
+    old = sub.add_parser("recognize-old", help="recognise older clips now, or switch recognising them in the "
+                                              "background on or off")
+    mode = old.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--limit", type=_positive_int, help="recognise this many unrecognised clips now")
+    mode.add_argument("--background", choices=("on", "off"),
+                      help="whether the app recognises older clips by itself (off: only new ones)")
+    old.add_argument("--newest-first", action="store_true", help="with --limit: take the newest clips first")
     return parser
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -61,6 +76,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "examples-import":
         settings = Settings.load()
         return run_examples_import(settings, args.csv, detector_loader=model_loader(settings))
+    if args.command == "recognize-old":
+        if args.limit is None and args.newest_first:
+            build_parser().error("--newest-first only goes with --limit")
+        settings = Settings.load()
+        return run_recognize_old(settings, limit=args.limit, newest_first=args.newest_first,
+                                 background=args.background, detector_loader=model_loader(settings))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.command == "serve":
         serve(Settings.load(), host=args.host, port=args.port)
@@ -425,6 +446,71 @@ def run_examples_import(
             examples += n
             clips += n > 0
         print(f"{examples} examples from {clips} clips")
+        return 0
+    finally:
+        conn.close()
+
+
+# recognize-old
+def run_recognize_old(
+    settings: Settings,
+    *,
+    limit: int | None = None,
+    newest_first: bool = False,
+    background: str | None = None,
+    detector_loader: Callable[[], object | None],
+    features: Callable = feature_print,
+) -> int:
+    """`--background on|off` only sets whether the app recognises older clips by itself. `--limit N` recognises
+    the N oldest (or newest) unrecognised clips now, one at a time at background priority, like the processor
+    does; Ctrl-C stops after the current clip. Needs the model and at least one example, as the processor does."""
+    conn = open_library(settings)
+    try:
+        if background is not None:
+            repo.set_setting(conn, repo.RECOGNIZE_OLD_KEY, background)
+            print(f"Recognising older clips in the background is {background}.")
+            return 0
+        if repo.example_count(conn) == 0:
+            print("There are no examples yet, so every clip would come out unknown. "
+                  "Import some first (`fatball examples-import`) or correct a visit.")
+            return 1
+        try:
+            detector = detector_loader()
+        except Exception:
+            log.exception("detector failed to load")
+            detector = None
+        if detector is None:
+            print("The detector model isn't available (run scripts/export_detector.py).")
+            return 1
+        qos.set_background_priority()
+        recognizer = Recognizer(settings, conn, detector, features)
+        clips = repo.clips_needing_recognition(conn, limit, newest_first=newest_first)
+        stop = threading.Event()
+        previous = None
+        if threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGINT, lambda signum, frame: stop.set())
+        done = failed = 0
+        try:
+            for i, clip in enumerate(clips, start=1):
+                if stop.is_set():
+                    break
+                started = time.monotonic()
+                error = recognize_and_group(conn, recognizer, clip)
+                seconds = time.monotonic() - started
+                if error is None:
+                    done += 1
+                    visit_id = repo.visit_for_clip(conn, clip.id)
+                    visit = repo.get_visit(conn, visit_id) if visit_id else None
+                    what = (visit["species_name"] or visit["subject"]) if visit else None
+                    print(f"[{i}/{len(clips)}] clip {clip.id}: {what or 'unknown'} ({seconds:.0f} s)")
+                else:
+                    failed += 1
+                    print(f"[{i}/{len(clips)}] clip {clip.id}: failed, {error} ({seconds:.0f} s)")
+        finally:
+            if previous is not None:
+                signal.signal(signal.SIGINT, previous)
+        waiting = len(repo.clips_needing_recognition(conn, 1_000_000))
+        print(f"{done} recognised, {failed} failed, {waiting} old clips still waiting")
         return 0
     finally:
         conn.close()

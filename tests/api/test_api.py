@@ -275,7 +275,25 @@ def test_status_reports_recognition_counts(settings, conn, cam, clock, local):
     clip(2)
     clip(3, recognized_at="2026-10-31T10:00:00+00:00")
     clip(4, recognition_error="boom")
-    assert _status(local)["recognition"] == {"pending": 2, "errors": 1, "model": False, "examples": 0}
+    assert _status(local)["recognition"] == {
+        "pending": 0, "old_waiting": 2, "errors": 1, "model": False, "examples": 0}
     loaded = TestClient(create_app(settings, now=clock, model_loaded=lambda: True), client=LOCAL,
                         base_url="http://localhost")
     assert _status(loaded)["recognition"]["model"] is True
+
+
+def test_status_counts_old_waiting(local, conn, cam):
+    ids = []
+    for n in range(3):
+        begin = datetime(2026, 10, 31, 8, n)
+        i = repo.add_clip(conn, cam, f"/w{n}", begin, begin, "h264", 1)
+        repo.set_clip_status(conn, i, "ready", web_path=f"clips/{i}/web.mp4")
+        ids.append(i)
+    photo = repo.add_clip(conn, cam, "/photo", datetime(2026, 10, 31, 9), datetime(2026, 10, 31, 9), "jpg", 1)
+    repo.set_clip_status(conn, photo, "ready")  # photos are never recognised
+    repo.requeue_recognition(conn, ids[0])
+    rec = _status(local)["recognition"]
+    assert (rec["pending"], rec["old_waiting"]) == (1, 2)
+    repo.set_setting(conn, "recognize_old_clips", "on")
+    rec = _status(local)["recognition"]
+    assert (rec["pending"], rec["old_waiting"]) == (3, 0)

@@ -202,6 +202,7 @@ def test_retry_requeues_recognition(local, conn, cam):
     assert local.post(f"/api/retry/{clip}").status_code == 204
     row = conn.execute("SELECT recognition_error, recognized_at FROM clip WHERE id = ?", (clip,)).fetchone()
     assert tuple(row) == (None, None)
+    assert conn.execute("SELECT recognition_wanted FROM clip WHERE id = ?", (clip,)).fetchone()[0] == 1
     assert [c.id for c in repo.clips_needing_recognition(conn, 10)] == [clip]
     assert local.post("/api/retry/999").status_code == 404
 

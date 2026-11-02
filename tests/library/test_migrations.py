@@ -14,11 +14,12 @@ def _columns(conn, table):
     return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def test_fresh_database_is_v2(tmp_path):
+def test_fresh_database_is_v3(tmp_path):
     conn = connect(tmp_path / "lib.db")
-    assert SCHEMA_VERSION == 2
-    assert _version(conn) == 2
+    assert SCHEMA_VERSION == 3
+    assert _version(conn) == 3
     assert {"recognized_at", "best_frame_path", "recognition_error", "verdict_json"} <= _columns(conn, "clip")
+    assert "recognition_wanted" in _columns(conn, "clip")
     assert "subject" in _columns(conn, "visit")
     assert {"cls", "feature", "label", "label_source"} <= _columns(conn, "detection")
     assert {"token", "visit_id", "before_json", "created_at"} == _columns(conn, "undo")
@@ -38,7 +39,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 2
+    assert _version(conn) == 3
     row = conn.execute("SELECT sd_path, recognized_at FROM clip").fetchone()
     assert row["sd_path"] == "/a"
     assert row["recognized_at"] is None
@@ -48,7 +49,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
 def test_migration_is_idempotent(tmp_path):
     connect(tmp_path / "lib.db").close()
     conn = connect(tmp_path / "lib.db")
-    assert _version(conn) == 2
+    assert _version(conn) == 3
     conn.close()
 
 
@@ -104,3 +105,19 @@ def test_a_fresh_library_makes_no_backup(tmp_path):
     connect(tmp_path / "library.sqlite").close()
     connect(tmp_path / "library.sqlite").close()
     assert list(tmp_path.glob("*.bak")) == []
+
+
+def test_v2_database_upgrades_to_v3_and_keeps_clips(tmp_path):
+    path = tmp_path / "lib.db"
+    _v1_library(path)
+    raw = sqlite3.connect(path)
+    for script in sorted(resources.files("fatball.library").joinpath("migrations").iterdir(), key=lambda e: e.name):
+        if script.name.startswith("002"):
+            raw.executescript(f"BEGIN;\n{script.read_text(encoding='utf-8')}\nPRAGMA user_version = 2;\nCOMMIT;")
+    raw.close()
+
+    conn = connect(path)
+    assert _version(conn) == 3
+    row = conn.execute("SELECT sd_path, recognition_wanted FROM clip").fetchone()
+    assert (row["sd_path"], row["recognition_wanted"]) == ("/a", 0)
+    conn.close()
