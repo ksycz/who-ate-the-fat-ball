@@ -49,9 +49,11 @@ def assign_visit(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -> int:
         else:
             visit_id = compatible[0]["id"]
             if not compatible[0]["moved_by_user"]:
+                species = compatible[0]["species_id"]  # the target's effective species as merges happen
                 for other in compatible[1:]:
-                    if _can_merge(compatible[0], other):
+                    if _can_merge(species, other):
                         _merge_into(conn, visit_id, other["id"])
+                        species = species if species is not None else other["species_id"]
         conn.execute("INSERT INTO visit_clip(visit_id, clip_id) VALUES (?, ?)", (visit_id, clip.id))
         _recompute(conn, visit_id, clip, verdict)
         if verdict.subject == "species":
@@ -127,11 +129,11 @@ def _near(conn: sqlite3.Connection, visit_id: int, clip: Clip) -> bool:
     return False
 
 
-def _can_merge(target: sqlite3.Row, other: sqlite3.Row) -> bool:
+def _can_merge(target_species: int | None, other: sqlite3.Row) -> bool:
     """Never merge an owner's visit, nor two visits of different sure species (an unknown clip can bridge them)."""
     if other["moved_by_user"]:
         return False
-    return target["species_id"] is None or other["species_id"] is None or target["species_id"] == other["species_id"]
+    return target_species is None or other["species_id"] is None or target_species == other["species_id"]
 
 
 def _merge_into(conn: sqlite3.Connection, target_id: int, other_id: int) -> None:

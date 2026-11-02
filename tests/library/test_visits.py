@@ -238,3 +238,14 @@ def test_dog_is_category_other_and_species_matched(conn, cam):
     _, d = recognise(conn, cam, 0, dog)
     _, p = recognise(conn, cam, 20, person())
     assert d != p
+
+
+def test_unknown_first_visit_never_collapses_two_species(conn, cam):
+    recognise(conn, cam, 0, unknown())
+    recognise(conn, cam, 70, sure(GREAT))
+    recognise(conn, cam, 100, sure(BLUE))
+    assert visit_count(conn) == 3
+    recognise(conn, cam, 40, unknown())
+    assert visit_count(conn) == 2
+    species = {r[0] for r in conn.execute("SELECT species_id FROM visit")}
+    assert len(species) == 2
