@@ -10,7 +10,7 @@ times a RemoteFile carries. Each write commits immediately.
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, fields
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from fatball.recognition.catalog import CATALOG, DOG
@@ -390,6 +390,32 @@ def clips_needing_recognition(
     order = "begin_at DESC, id DESC" if newest_first else "begin_at, id"
     rows = conn.execute(f"SELECT * FROM clip WHERE {where} ORDER BY {order} LIMIT ?", (limit,))
     return [_clip(r) for r in rows]
+
+
+def count_needing_recognition(conn: sqlite3.Connection) -> int:
+    """How many ready videos are still unrecognised and not failed, whatever the setting."""
+    return conn.execute(f"SELECT COUNT(*) FROM clip WHERE {_NEEDS_RECOGNITION}").fetchone()[0]
+
+
+HEARTBEAT_KEY = "processor_heartbeat"
+HEARTBEAT_FRESH_S = 30
+
+
+def beat(conn: sqlite3.Connection, now: datetime) -> None:
+    """The running app's processor says it is alive (UTC ISO time in the settings)."""
+    set_setting(conn, HEARTBEAT_KEY, now.astimezone(UTC).isoformat())
+
+
+def app_is_running(conn: sqlite3.Connection, now: datetime) -> bool:
+    """True when the processor beat less than HEARTBEAT_FRESH_S ago."""
+    value = get_setting(conn, HEARTBEAT_KEY)
+    if value is None:
+        return False
+    try:
+        age = (now - datetime.fromisoformat(value)).total_seconds()
+    except ValueError:
+        return False
+    return age < HEARTBEAT_FRESH_S
 
 
 def set_recognition_error(conn: sqlite3.Connection, clip_id: int, message: str) -> None:

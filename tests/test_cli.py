@@ -485,3 +485,25 @@ def test_recognize_old_arguments():
     for bad in (["--limit", "0"], ["--limit", "2", "--background", "on"], [], ["--background", "maybe"]):
         with pytest.raises(SystemExit):
             parse(["recognize-old", *bad])
+
+
+def test_recognize_old_refuses_while_the_app_runs(library, capsys):
+    settings, conn, _ = library
+    old = _old_clips(settings, conn, n=1)
+    now = datetime(2026, 11, 2, 12, 0).astimezone()
+    repo.beat(conn, now - timedelta(seconds=10))
+    assert cli.run_recognize_old(settings, limit=1, detector_loader=_bird_loader(), features=_bird_features,
+                                 now=lambda: now) == 1
+    assert "app is running" in capsys.readouterr().out
+    assert old[0] not in _recognized_ids(conn)
+    assert cli.run_recognize_old(settings, background="on", detector_loader=_no_model, now=lambda: now) == 0
+
+
+def test_recognize_old_runs_when_the_heartbeat_is_stale(library, capsys):
+    settings, conn, _ = library
+    old = _old_clips(settings, conn, n=1)
+    now = datetime(2026, 11, 2, 12, 0).astimezone()
+    repo.beat(conn, now - timedelta(seconds=31))
+    assert cli.run_recognize_old(settings, limit=1, detector_loader=_bird_loader(), features=_bird_features,
+                                 now=lambda: now) == 0
+    assert old[0] in _recognized_ids(conn)

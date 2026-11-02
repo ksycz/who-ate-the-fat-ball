@@ -9,6 +9,7 @@ import dataclasses
 import logging
 import sqlite3
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fatball.config import Settings
@@ -41,12 +42,14 @@ class Processor:
         *,
         detector_loader: Callable[[], DetectorLike | None] | None = None,
         features: Callable = feature_print,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.settings = settings
         self.conn = conn
         self.recognizer = recognizer
         self._detector_loader = detector_loader
         self._features = features
+        self._now = now
         self._warned_no_model = False
         self._warned_no_examples = False
         # A crash mid-conversion leaves clips in "processing": retry them.
@@ -82,6 +85,7 @@ class Processor:
         Each clip is claimed atomically just before converting and re-read by id, so a clip someone
         else claimed is skipped and the raw_path used is the one stored now, not the listing's.
         """
+        repo.beat(self.conn, self._now())  # tells `fatball recognize-old` that the app is running
         recognizer = self._current_recognizer()
         if recognizer is not None and not self._has_examples():
             recognizer = None

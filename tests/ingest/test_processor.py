@@ -363,3 +363,12 @@ def test_a_wanted_clip_that_fails_is_not_wanted_any_more(settings, conn):
     Processor(settings, conn, StubRecognizer(conn, fail=[bad])).process_pending()
     assert conn.execute("SELECT recognition_wanted FROM clip WHERE id = ?", (bad,)).fetchone()[0] == 0
     assert _recognition(conn, bad)[1] is not None
+
+
+def test_each_pass_writes_a_heartbeat(settings, conn):
+    now = datetime(2026, 11, 2, 12, 0).astimezone()
+    p = Processor(settings, conn, now=lambda: now)
+    assert not repo.app_is_running(conn, now)
+    p.process_pending()
+    assert repo.app_is_running(conn, now + timedelta(seconds=29))
+    assert not repo.app_is_running(conn, now + timedelta(seconds=30))

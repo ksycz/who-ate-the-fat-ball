@@ -460,16 +460,21 @@ def run_recognize_old(
     background: str | None = None,
     detector_loader: Callable[[], object | None],
     features: Callable = feature_print,
+    now: Callable[[], datetime] = lambda: datetime.now().astimezone(),
 ) -> int:
     """`--background on|off` only sets whether the app recognises older clips by itself. `--limit N` recognises
     the N oldest (or newest) unrecognised clips now, one at a time at background priority, like the processor
-    does; Ctrl-C stops after the current clip. Needs the model and at least one example, as the processor does."""
+    does; Ctrl-C stops after the current clip. Refuses while the app runs (fresh processor heartbeat). Needs the model and at least one example, as the processor does."""
     conn = open_library(settings)
     try:
         if background is not None:
             repo.set_setting(conn, repo.RECOGNIZE_OLD_KEY, background)
             print(f"Recognising older clips in the background is {background}.")
             return 0
+        if repo.app_is_running(conn, now()):
+            print("The app is running, and it could recognise the same clips twice. Stop it first, or use "
+                  "`fatball recognize-old --background on` to let the running app do it.")
+            return 1
         if repo.example_count(conn) == 0:
             print("There are no examples yet, so every clip would come out unknown. "
                   "Import some first (`fatball examples-import`) or correct a visit.")
@@ -509,7 +514,7 @@ def run_recognize_old(
         finally:
             if previous is not None:
                 signal.signal(signal.SIGINT, previous)
-        waiting = len(repo.clips_needing_recognition(conn, 1_000_000))
+        waiting = repo.count_needing_recognition(conn)
         print(f"{done} recognised, {failed} failed, {waiting} old clips still waiting")
         return 0
     finally:
