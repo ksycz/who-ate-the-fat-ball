@@ -1,0 +1,35 @@
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/600.css";
+@import "@fontsource/plus-jakarta-sans/800.css";
+
+:root {
+  --robin: #b4491a;
+  --robin-dark: #8f3712;
+  --robin-tint: #f7e1d3;
+  --peach: #ffede3;
+  --sand: #f1e8dc;
+  --ink: #2e2116;
+  --ink-2: #5e5040;
+  --olive: #6e5b3a;
+  --line: #e9e0d4;
+  --line-strong: #e0d5c6;
+  --field: #a8998a;
+  --chip: #e3ebf0;
+  --chip-ink: #34505f;
+  --dot-animals: #8fa6b4;
+  --dot-other: #c9bba8;
+  --ok: #2e8b57;
+}
+
+body {
+  margin: 0;
+  background: var(--sand);
+  color: var(--ink);
+  font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+}
+
+a {
+  color: var(--robin-dark);
+  text-decoration: none;
+}

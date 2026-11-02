@@ -142,8 +142,10 @@ def test_media_supports_range_requests(lan, settings):
 
 def test_media_rejects_path_traversal(local, settings):
     settings.db_path.touch()
-    for url in ("/media/../library.sqlite", "/media/%2e%2e/library.sqlite", "/media/clips/%2e%2e/%2e%2e/library.sqlite"):
+    for url in ("/media/%2e%2e/library.sqlite", "/media/clips/%2e%2e/%2e%2e/library.sqlite"):
         assert local.get(url).status_code == 404
+    # The client normalises this one to /library.sqlite, a gallery page path: it must not serve the database.
+    assert b"SQLite" not in local.get("/media/../library.sqlite").content
     (settings.data_dir / "secret.txt").write_text("x")
     assert local.get("/media/..%2fsecret.txt").status_code == 404
 

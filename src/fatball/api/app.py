@@ -6,10 +6,12 @@ import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StringConstraints
 
 from fatball import secrets as camera_secrets
@@ -19,6 +21,8 @@ from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
 from fatball.library import corrections, db, repo, today
 
+STATIC_DIR = Path(__file__).parent / "static"
+NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
 RECENT = timedelta(hours=1)
 # Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
 # Everything else (an interrupted download, a clock that could not be set...) is reported in last_error
@@ -121,6 +125,7 @@ def create_app(
     *,
     now: Callable[[], datetime] = _local_now,
     model_loaded: Callable[[], bool] = lambda: False,
+    static_dir: Path | None = None,
 ) -> FastAPI:
     """Build the API. `model_loaded` says whether the processor currently has a detector. Each request gets its own database connection (sqlite3 connections must not be
     shared across FastAPI's thread pool); the database is created up front so requests never race to."""
@@ -321,6 +326,19 @@ def create_app(
     @app.get("/api/me")
     def me(request: Request):
         return {"can_edit": auth_mod.can_edit(request)}
+
+    # The gallery: registered after every API route so /api/* and /media/* 404s stay JSON.
+    static_root = (static_dir or STATIC_DIR).resolve()
+    app.mount("/assets", StaticFiles(directory=static_root / "assets", check_dir=False), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def gallery(path: str):
+        if path.split("/")[0] in ("api", "media"):
+            raise HTTPException(status_code=404)
+        index = static_root / "index.html"
+        if not index.is_file():
+            return PlainTextResponse(NOT_BUILT, status_code=503)
+        return FileResponse(index)
 
     return app
 

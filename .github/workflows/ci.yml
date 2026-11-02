@@ -12,5 +12,14 @@ jobs:
       - run: brew install ffmpeg
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web test
+      - run: npm --prefix web run check
+      - run: npm --prefix web run build
       - run: uv run ruff check
       - run: uv run pytest -q
