@@ -9,7 +9,7 @@
   import Today from "./pages/Today.svelte";
   import Visit from "./pages/Visit.svelte";
   import More from "./pages/More.svelte";
-  import Status from "./pages/Status.svelte";
+  import AppStatus from "./pages/AppStatus.svelte";
   import Unlock from "./pages/Unlock.svelte";
   import Setup from "./pages/Setup.svelte";
   import NotFound from "./pages/NotFound.svelte";
@@ -18,7 +18,7 @@
     today: Today,
     visit: Visit,
     more: More,
-    status: Status,
+    status: AppStatus,
     unlock: Unlock,
     setup: Setup,
     notfound: NotFound,

@@ -7,6 +7,7 @@
   import Logo from "./Logo.svelte";
   import CameraStatus from "./CameraStatus.svelte";
   import Icon from "./Icon.svelte";
+  import SortedInto from "./SortedInto.svelte";
 
   let status = $state<Status | null>(null);
   let now = $state(new Date());
@@ -29,11 +30,6 @@
   });
 
   const name = $derived($route.name);
-  const sorted = $derived([
-    { label: "Birds", href: "/birds", dot: "var(--robin)", count: status?.sorted.birds, names: ["birds"] },
-    { label: "Other animals", href: "/other-animals", dot: "var(--dot-animals)", count: status?.sorted.other_animals, names: ["other-animals"] },
-    { label: "Other", href: "/other", dot: "var(--dot-other)", count: status?.sorted.other, names: ["other"] },
-  ]);
 </script>
 
 <nav aria-label="Main">
@@ -48,17 +44,7 @@
     {#if status}<span class="count">{status.sorted.favourites}</span>{/if}
   </a>
 
-  <div class="sorted" role="group" aria-labelledby="sorted-h">
-    <span id="sorted-h" class="sorted-head">Sorted into</span>
-    {#each sorted as s (s.label)}
-      {@const on = s.names.includes(name)}
-      <a class="item" href={s.href} use:link aria-current={on ? "page" : undefined} class:on>
-        <span class="swatch" style:background={s.dot}></span>
-        <span class="label">{s.label}</span>
-        {#if s.count !== undefined}<span class="count">{s.count}</span>{/if}
-      </a>
-    {/each}
-  </div>
+  <SortedInto sorted={status?.sorted} current={name} />
 
   <a class="item" href="/status" use:link aria-current={name === "status" ? "page" : undefined} class:on={name === "status"}>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
@@ -104,11 +90,5 @@
   .item.on :global(svg) { color: var(--robin-dark); }
   .label { flex: 1; }
   .count { font-size: 12px; color: var(--ink-2); }
-  .sorted {
-    margin: 12px 0; padding: 10px 8px; border-radius: 16px; background: var(--sand); border: 1px solid var(--line);
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .sorted-head { padding: 0 6px 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
-  .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(46, 33, 22, 0.45); }
   .camera { margin-top: auto; padding: 16px 10px 0; }
 </style>

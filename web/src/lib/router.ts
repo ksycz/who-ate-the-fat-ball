@@ -44,8 +44,9 @@ export const route = writable<Route>(matchRoute(window.location.pathname));
 // Pages we push carry this marker in history.state, so back() knows the previous entry is ours.
 const OWN = { fatball: true };
 
-export function navigate(path: string): void {
-  window.history.pushState(OWN, "", path);
+export function navigate(path: string, opts: { replace?: boolean } = {}): void {
+  if (opts.replace) window.history.replaceState(OWN, "", path);
+  else window.history.pushState(OWN, "", path);
   route.set(matchRoute(new URL(path, window.location.origin).pathname));
 }
 
