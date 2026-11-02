@@ -110,6 +110,7 @@ export interface Species {
 
 export interface Status {
   day: string;
+  local: boolean; // the request comes from the Mac itself
   camera: Camera;
   sorted: { birds: number; other_animals: number; other: number; favourites: number };
   queue: { downloaded: number; processing: number; failed: number };

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ApiError, getJSON, send, type Category, type Clip, type Visit } from "../lib/api";
+  import { ApiError, getJSON, send, type Clip, type Visit } from "../lib/api";
   import { route, back } from "../lib/router";
-  import { canEdit, changes, noteServerDay, serverDay, showSaveFailure, showToast } from "../lib/session";
-  import { speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
+  import { canEdit, changes, noteChanged, noteServerDay, serverDay, showSaveFailure, showToast } from "../lib/session";
+  import { correctionText, speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "../components/Chip.svelte";
   import Picker from "../components/Picker.svelte";
@@ -14,12 +14,6 @@
     confidence: number;
   }
   type Detail = Visit & { clips: Clip[]; guesses: Guess[] };
-
-  const CATEGORY_NAMES: Record<Category, string> = {
-    birds: "Birds",
-    other_animals: "Other animals",
-    other: "Other",
-  };
 
   let visit = $state<Detail | null>(null);
   let missing = $state(false);
@@ -123,11 +117,8 @@
         species: g.scientific,
       });
       const fresh = await reload();
-      const text =
-        fresh && fresh.category !== before
-          ? `Moved to ${CATEGORY_NAMES[fresh.category]}`
-          : `Changed to ${speciesLabel(g)}`;
-      showToast(text, undo_token);
+      showToast(correctionText(before, fresh?.category ?? before, speciesLabel(g)), undo_token);
+      noteChanged();
     } catch (e) {
       showSaveFailure(e);
     } finally {
@@ -151,6 +142,7 @@
       });
       visit = { ...visit, is_favourite: want };
       showToast(want ? "Added to Favourites" : "Removed from Favourites", undo_token);
+      noteChanged();
     } catch (e) {
       showSaveFailure(e);
     } finally {
@@ -216,7 +208,7 @@
       <div class="meta-row">
         <div class="meta">
           {#if $serverDay !== null}{visitTime(visit.started_at, visit.ended_at, today)}{/if}
-          {#if !visit.corrected && sureChip(visit.confidence)}
+          {#if !visit.corrected && visit.species && sureChip(visit.confidence)}
             <Chip text={sureChip(visit.confidence) ?? ""} />
           {/if}
         </div>
@@ -226,7 +218,7 @@
           </button>
         {/if}
       </div>
-      {#if alternatives.length > 0}
+      {#if alternatives.length > 0 && !visit.corrected}
         <div class="maybe">
           <span>Or maybe</span>
           {#each alternatives as g (g.scientific)}

@@ -44,7 +44,11 @@ export const route = writable<Route>(matchRoute(window.location.pathname));
 // Pages we push carry this marker in history.state, so back() knows the previous entry is ours.
 const OWN = { fatball: true };
 
+// True when the last page change was Back/Forward, so lists restore where they were; a click starts fresh.
+export const arrival = { viaHistory: false };
+
 export function navigate(path: string, opts: { replace?: boolean } = {}): void {
+  arrival.viaHistory = false;
   if (opts.replace) window.history.replaceState(OWN, "", path);
   else window.history.pushState(OWN, "", path);
   route.set(matchRoute(new URL(path, window.location.origin).pathname));
@@ -59,5 +63,6 @@ export function back(fallback = "/"): void {
 }
 
 window.addEventListener("popstate", () => {
+  arrival.viaHistory = true;
   route.set(matchRoute(window.location.pathname));
 });

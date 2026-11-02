@@ -34,3 +34,25 @@ test("a favourite shows up in Favourites", async ({ page }) => {
   await expect(page.getByRole("link", { name: /Blue tit/ })).toHaveCount(1);
   await expect(page.getByText(/No favourites yet/)).toBeHidden();
 });
+
+test("Back from a visit keeps your place in Birds", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto("/birds");
+  await expect(page.getByRole("link", { name: /Nuthatch/ })).toBeVisible();
+  await page.mouse.wheel(0, 900);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(500);
+  const before = await page.evaluate(() => window.scrollY);
+  const cards = page.locator("main a.card");
+  const index = await cards.evaluateAll((els) =>
+    els.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= window.innerHeight - 100; // clear of the bottom menu
+    }),
+  );
+  expect(index).toBeGreaterThanOrEqual(0);
+  await cards.nth(index).click();
+  await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Birds", level: 1 })).toBeVisible();
+  await expect.poll(() => page.evaluate((y) => Math.abs(window.scrollY - y), before)).toBeLessThan(40);
+});

@@ -7,7 +7,8 @@
   let { visit, today }: { visit: Visit; today: string } = $props();
 
   const image = $derived(visit.best_frame_url ?? visit.poster_url);
-  const chip = $derived(sureChip(visit.confidence));
+  // "% sure" only means something for a species the app picked; a correction or no species has none.
+  const chip = $derived(!visit.corrected && visit.species ? sureChip(visit.confidence) : null);
 </script>
 
 <a class="card" href="/visit/{visit.id}" use:link>

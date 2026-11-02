@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getJSON, send, type Today } from "../lib/api";
-  import { canEdit, noteServerDay } from "../lib/session";
-  import { clipBadge, speciesLabel, timeOfDay, visitTime, whenText } from "../lib/format";
+  import { canEdit, changes, noteServerDay, showSaveFailure } from "../lib/session";
+  import { loadTodayScroll, saveTodayScroll } from "../lib/listCache";
+  import { arrival } from "../lib/router";
+  import { clipBadge, plural, speciesLabel, timeOfDay, visitTime, whenText } from "../lib/format";
   import { link } from "../lib/link";
   import Logo from "../components/Logo.svelte";
   import CameraStatus from "../components/CameraStatus.svelte";
@@ -15,19 +17,39 @@
   let data = $state<Today | null>(null);
   let now = $state(new Date());
   let retrying = $state(false);
+  let unreachable = $state(false);
+  let restoreY: number | null = null; // where Back left us; applied once, after the first render
+  let lastY = 0;
+  const onScroll = () => (lastY = window.scrollY);
 
   async function load() {
     try {
       data = await getJSON<Today>("/api/today");
+      unreachable = false;
       now = new Date();
       noteServerDay(data.day);
+      if (restoreY !== null) {
+        const y = restoreY;
+        restoreY = null;
+        await tick();
+        window.scrollTo(0, y);
+      }
     } catch {
       // keep what is on screen; the next refresh tries again
+      if (!data) unreachable = true;
     }
   }
 
   onMount(() => {
+    window.addEventListener("scroll", onScroll, { passive: true });
+    if (arrival.viaHistory) restoreY = loadTodayScroll();
     load();
+    // A correction or an Undo changes what today shows.
+    let firstChange = true;
+    const stop = changes.subscribe(() => {
+      if (firstChange) firstChange = false;
+      else load();
+    });
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") load();
     }, REFRESH_MS);
@@ -36,12 +58,13 @@
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
+      stop();
+      saveTodayScroll(lastY);
+      window.removeEventListener("scroll", onScroll);
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   });
-
-  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   const retryable = $derived(data?.failed.filter((f) => f.can_retry) ?? []);
   const isEmpty = $derived(!!data && data.visits.length === 0 && data.checking.length === 0);
@@ -75,8 +98,8 @@
     try {
       for (const id of ids) await send("POST", `/api/retry/${id}`);
       data = { ...data, failed: data.failed.filter((f) => !ids.includes(f.clip_id)) };
-    } catch {
-      // leave the row so it can be tried again
+    } catch (e) {
+      showSaveFailure(e); // the row stays so it can be tried again
     } finally {
       retrying = false;
     }
@@ -89,6 +112,13 @@
     <div class="brand"><Logo size={30} />Who Ate the Fat Ball?</div>
     {#if data}<span class="pill"><CameraStatus camera={data.camera} {now} today={data.day} short /></span>{/if}
   </header>
+
+  {#if unreachable}
+    <div class="empty">
+      <div class="empty-text">Couldn't reach the app. Check the Wi-Fi and try again.</div>
+      <button type="button" class="again" onclick={load}>Try again</button>
+    </div>
+  {/if}
 
   {#if data}
     {#if problem}
@@ -216,6 +246,13 @@
   .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .name { font-size: 17px; font-weight: 600; }
   .time { font-size: 13px; color: var(--ink-2); }
+  .again {
+    min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line-strong);
+    background: #fff; color: var(--robin-dark); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  @media (min-width: 768px) {
+    .brand { display: none; }
+  }
   .retry {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     font-size: 13px; color: var(--ink-2); padding: 0 4px;

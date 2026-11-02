@@ -1,14 +1,6 @@
 <script lang="ts">
-  import { navigate } from "../lib/router";
+  import { link } from "../lib/link";
 </script>
 
 <h1>Page not found</h1>
-<p>
-  <a
-    href="/"
-    onclick={(e) => {
-      e.preventDefault();
-      navigate("/");
-    }}>Go to Today</a
-  >
-</p>
+<p><a href="/" use:link>Go to Today</a></p>

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { ApiError, send } from "../lib/api";
+  import { onMount } from "svelte";
+  import { ApiError, getJSON, send, type Status } from "../lib/api";
 
   let ip = $state("");
   let password = $state("");
@@ -7,6 +8,15 @@
   let message = $state("");
   let saved = $state(false);
   let busy = $state(false);
+  // Asked of the server: only requests from the Mac itself may change setup. Unknown until it answers.
+  let local = $state<boolean | null>(null);
+
+  onMount(() => {
+    getJSON<Status>("/api/status").then(
+      (s) => (local = s.local),
+      () => (local = true), // can't tell; the server still refuses anyone else
+    );
+  });
 
   async function submit(e: Event) {
     e.preventDefault();
@@ -45,6 +55,9 @@
 </script>
 
 <h1>Setup</h1>
+{#if local === false}
+  <p class="msg">Setup only works on the Mac itself.</p>
+{:else if local}
 <form onsubmit={submit}>
   <label for="ip">Camera address</label>
   <input id="ip" type="text" autocomplete="off" bind:value={ip} />
@@ -57,6 +70,7 @@
   {#if saved}<p class="ok" role="status">Saved</p>{/if}
   {#if message}<p class="msg" role="alert">{message}</p>{/if}
 </form>
+{/if}
 
 <style>
   h1 { margin: 20px 0 16px; font-weight: 800; font-size: 34px; letter-spacing: -0.8px; }

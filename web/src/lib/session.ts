@@ -20,11 +20,12 @@ export function showToast(text: string, undoToken?: string): void {
   toast.set(undoToken === undefined ? { text } : { text, undoToken });
 }
 
-// Counts successful undos; the page that made a change re-fetches itself when this goes up.
+// Counts changes to the library (a saved correction or an undo): pages that show it re-fetch when this goes up.
 export const changes = writable(0);
-export function noteUndone(): void {
+export function noteChanged(): void {
   changes.update((n) => n + 1);
 }
+export const noteUndone = noteChanged;
 
 export const LOCKED_TEXT = "Editing is locked on this device";
 export const NETWORK_TEXT = "Couldn't save. Check the Wi-Fi and try again.";
@@ -40,6 +41,7 @@ export function saveFailure(e: unknown): { text: string; locked: boolean } {
 
 export function showSaveFailure(e: unknown): void {
   const f = saveFailure(e);
+  if (f.locked) canEdit.set(false); // the Mac says this device may not edit, so stop offering it
   toast.set(f.locked ? { text: f.text, unlock: true } : { text: f.text });
 }
 

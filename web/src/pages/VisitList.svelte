@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getJSON, type Today, type Visit } from "../lib/api";
   import { dayHeading, dayOf } from "../lib/format";
   import { changes, noteServerDay, serverDay } from "../lib/session";
+  import { loadList, saveList } from "../lib/listCache";
+  import { arrival } from "../lib/router";
   import NewSpeciesBanner from "../components/NewSpeciesBanner.svelte";
   import VisitCard from "../components/VisitCard.svelte";
 
@@ -84,8 +86,22 @@
   });
 
   let firstChange = true;
+  let lastY = 0;
+  const onScroll = () => (lastY = window.scrollY);
+
   onMount(() => {
-    reload();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    const cached = arrival.viaHistory ? loadList(kind) : undefined;
+    if (cached) {
+      // Back from a visit: the same items and place as when we left.
+      visits = cached.visits;
+      cursor = cached.cursor;
+      loaded = true;
+      lastY = cached.scrollY;
+      tick().then(() => window.scrollTo(0, cached.scrollY));
+    } else {
+      reload();
+    }
     if ($serverDay === null) {
       getJSON<{ day: string }>("/api/status").then((s) => noteServerDay(s.day)).catch(() => {});
     }
@@ -102,7 +118,11 @@
       if (firstChange) firstChange = false;
       else reload();
     });
-    return stop;
+    return () => {
+      stop();
+      window.removeEventListener("scroll", onScroll);
+      if (loaded) saveList(kind, { visits, cursor, scrollY: lastY });
+    };
   });
 
   $effect(() => {

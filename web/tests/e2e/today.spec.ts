@@ -16,7 +16,6 @@ test("a busy day: champion, new species, checking and failed clips", async ({ pa
   await expect(banner).toContainText("Nuthatch · 09:45");
   await expect(banner.getByRole("link", { name: "Watch" })).toBeVisible();
 
-
   await page.goto("/");
   await expect(page.getByText("Checking who it is…")).toBeVisible();
   await expect(page.getByText(/1 clip couldn.t be fetched/)).toBeVisible();

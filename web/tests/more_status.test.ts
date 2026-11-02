@@ -12,6 +12,7 @@ import type { Status } from "../src/lib/api";
 function status(over: Partial<Status> = {}): Status {
   return {
     day: "2026-11-02",
+    local: true,
     camera: { state: "ok", last_seen_at: "2026-11-02T10:00:00+00:00", last_error: null },
     sorted: { birds: 41, other_animals: 3, other: 7, favourites: 12 },
     queue: { downloaded: 2, processing: 1, failed: 0 },
@@ -105,16 +106,16 @@ describe("AppStatus", () => {
     expect(await screen.findByText("12.4 GB free")).toBeTruthy();
     expect(screen.queryByText("Disk nearly full")).toBeNull();
     expect(screen.getByText(/4 waiting to be recognised/)).toBeTruthy();
+    expect(screen.getByText("7 clips waiting")).toBeTruthy();
   });
 
-  it("setup_link_only_on_localhost", async () => {
-    serve(status());
-    vi.stubGlobal("location", { ...window.location, hostname: "192.168.1.20" });
+  it("setup_link_only_when_the_server_says_local", async () => {
+    serve(status({ local: false }));
     const first = render(AppStatus);
     await screen.findByText("12.4 GB free");
     expect(screen.queryByRole("link", { name: "Setup" })).toBeNull();
     first.unmount();
-    vi.stubGlobal("location", { ...window.location, hostname: "localhost" });
+    serve(status({ local: true }));
     render(AppStatus);
     expect((await screen.findByRole("link", { name: "Setup" })).getAttribute("href")).toBe("/setup");
   });
@@ -160,7 +161,7 @@ describe("Setup", () => {
   it("setup_sends_only_filled_fields", async () => {
     serve(status(), { "PUT /api/setup": () => new Response(null, { status: 204 }) });
     render(Setup);
-    const pw = screen.getByLabelText("Camera password") as HTMLInputElement;
+    const pw = (await screen.findByLabelText("Camera password")) as HTMLInputElement;
     expect(pw.type).toBe("password");
     expect(pw.value).toBe("");
     await fireEvent.input(screen.getByLabelText("Camera address"), { target: { value: "192.168.1.50" } });
@@ -175,7 +176,7 @@ describe("Setup", () => {
   it("setup_rejects_a_bad_pin_without_sending", async () => {
     serve(status());
     render(Setup);
-    await fireEvent.input(screen.getByLabelText("Edit PIN"), { target: { value: "12" } });
+    await fireEvent.input(await screen.findByLabelText("Edit PIN"), { target: { value: "12" } });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("The edit PIN is 4 digits")).toBeTruthy();
     expect(fetchMock.mock.calls.some((c) => c[0] === "/api/setup")).toBe(false);
@@ -184,8 +185,16 @@ describe("Setup", () => {
   it("setup_off_the_mac_message", async () => {
     serve(status(), { "PUT /api/setup": () => new Response("{}", { status: 403 }) });
     render(Setup);
-    await fireEvent.input(screen.getByLabelText("Camera address"), { target: { value: "192.168.1.50" } });
+    await fireEvent.input(await screen.findByLabelText("Camera address"), { target: { value: "192.168.1.50" } });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Setup only works on the Mac itself.")).toBeTruthy();
+  });
+
+  it("setup_off_the_mac_shows_the_message_instead_of_the_form", async () => {
+    serve(status({ local: false }));
+    render(Setup);
+    expect(await screen.findByText("Setup only works on the Mac itself.")).toBeTruthy();
+    expect(screen.queryByLabelText("Camera address")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });

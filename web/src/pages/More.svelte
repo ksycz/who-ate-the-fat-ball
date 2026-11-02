@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { getJSON, type Status } from "../lib/api";
   import { navigate } from "../lib/router";
-  import { canEdit, noteServerDay, serverDay } from "../lib/session";
-  import { cameraStatus } from "../lib/format";
+  import { canEdit, changes, noteServerDay, serverDay } from "../lib/session";
+  import { cameraStatus, plural } from "../lib/format";
   import { link } from "../lib/link";
   import SortedInto from "../components/SortedInto.svelte";
 
@@ -18,6 +18,16 @@
       navigate("/", { replace: true });
       return;
     }
+    load();
+    // The Sorted-into counts follow corrections and undos.
+    let first = true;
+    return changes.subscribe(() => {
+      if (first) first = false;
+      else load();
+    });
+  });
+
+  function load() {
     getJSON<Status>("/api/status").then(
       (s) => {
         status = s;
@@ -25,7 +35,7 @@
       },
       () => {},
     );
-  });
+  }
 </script>
 
 <h1>More</h1>
@@ -45,7 +55,7 @@
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
       <span class="stack">
         <span>App status</span>
-        {#if cam}<span class="sub"><span class="dot {cam.dot}"></span>{cam.text} · {waiting} clips waiting</span>{/if}
+        {#if cam}<span class="sub"><span class="dot {cam.dot}"></span>{cam.text} · {plural(waiting, "clip")} waiting</span>{/if}
       </span>
     </span>
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>

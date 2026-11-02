@@ -1,4 +1,4 @@
-import type { Status, Visit } from "./api";
+import type { Category, Status, Visit } from "./api";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -144,3 +144,17 @@ export function dayHeading(day: string, today: string): string {
 export function dayOf(at: string): string {
   return dayKey(parseWall(at));
 }
+
+export const CATEGORY_NAMES: Record<Category, string> = {
+  birds: "Birds",
+  other_animals: "Other animals",
+  other: "Other",
+};
+
+// The toast after a correction: it says where the visit went when its list changed, else what it was changed to.
+export function correctionText(from: Category, to: Category, label: string): string {
+  return from !== to ? `Moved to ${CATEGORY_NAMES[to]}` : `Changed to ${label}`;
+}
+
+// "1 visit", "2 visits".
+export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;

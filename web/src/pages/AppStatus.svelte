@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getJSON, type Status } from "../lib/api";
-  import { cameraStatus, whenText } from "../lib/format";
+  import { cameraStatus, plural, whenText } from "../lib/format";
   import { noteServerDay, serverDay } from "../lib/session";
   import { link } from "../lib/link";
 
@@ -28,12 +28,11 @@
   };
   const errorText = (code: string) => ERRORS[code] ?? `Something went wrong (${code}). The app keeps trying.`;
 
-  const onMac = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname);
   const cam = $derived(status ? cameraStatus(status.camera, now, $serverDay ?? status.day) : null);
   const lastSeen = $derived(
     status?.camera.last_seen_at ? whenText(status.camera.last_seen_at, $serverDay ?? status.day) : "not yet",
   );
-  const waiting = $derived(status ? status.queue.downloaded + status.queue.processing : 0);
+  const waiting = $derived(status ? status.queue.downloaded + status.queue.processing + status.recognition.pending : 0);
 </script>
 
 <h1>App status</h1>
@@ -48,7 +47,7 @@
   </section>
   <section>
     <h2>Processing</h2>
-    <p class="line">{waiting} clips in the queue</p>
+    <p class="line">{plural(waiting, "clip")} waiting</p>
     <p class="line">{status.recognition.pending} waiting to be recognised</p>
     {#if status.queue.failed > 0}<p class="line">{status.queue.failed} failed</p>{/if}
   </section>
@@ -57,7 +56,7 @@
     <p class="line">{(status.disk.free_bytes / 1e9).toFixed(1)} GB free</p>
     {#if status.disk.low}<p class="warn">Disk nearly full</p>{/if}
   </section>
-  {#if onMac}<a class="setup" href="/setup" use:link>Setup</a>{/if}
+  {#if status.local}<a class="setup" href="/setup" use:link>Setup</a>{/if}
 {/if}
 
 <style>

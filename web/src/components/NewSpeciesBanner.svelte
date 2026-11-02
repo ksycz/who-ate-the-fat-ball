@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Today } from "../lib/api";
-  import { speciesLabel, timeOfDay } from "../lib/format";
+  import { speciesLabel, timeOfDay, whenText } from "../lib/format";
+  import { serverDay } from "../lib/session";
   import { link } from "../lib/link";
   import Logo from "./Logo.svelte";
 
@@ -13,7 +14,7 @@
   <Logo size={36} variant="mark" />
   <span class="text">
     <span class="head">New species</span>
-    <span class="line">{speciesLabel(species)} · {timeOfDay(species.started_at)}</span>
+    <span class="line">{speciesLabel(species)} · {$serverDay === null ? timeOfDay(species.started_at) : whenText(species.started_at, $serverDay)}</span>
   </span>
   <a class="watch" href="/visit/{species.visit_id}" use:link>Watch</a>
 </div>

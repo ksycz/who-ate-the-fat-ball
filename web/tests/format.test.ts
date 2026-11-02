@@ -130,3 +130,19 @@ describe("dayHeading", () => {
     expect(dayHeading("2025-12-30", "2026-01-01")).toBe("Tuesday 30 December");
   });
 });
+
+describe("plural and correctionText", () => {
+  it("plural_counts_0_1_2", async () => {
+    const { plural } = await import("../src/lib/format");
+    expect(plural(0, "clip")).toBe("0 clips");
+    expect(plural(1, "clip")).toBe("1 clip");
+    expect(plural(2, "clip")).toBe("2 clips");
+  });
+
+  it("correctionText_says_moved_only_when_the_list_changes", async () => {
+    const { correctionText } = await import("../src/lib/format");
+    expect(correctionText("birds", "other", "Dog")).toBe("Moved to Other");
+    expect(correctionText("birds", "other_animals", "x")).toBe("Moved to Other animals");
+    expect(correctionText("birds", "birds", "Blue tit")).toBe("Changed to Blue tit");
+  });
+});

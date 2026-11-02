@@ -1,17 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getJSON, send, type Category, type Species, type Visit } from "../lib/api";
-  import { speciesLabel } from "../lib/format";
+  import { correctionText, speciesLabel } from "../lib/format";
   import { link } from "../lib/link";
-  import { saveFailure, showToast } from "../lib/session";
+  import { noteChanged, saveFailure, showToast } from "../lib/session";
 
   let { visit, onclose, onchanged }: { visit: Visit; onclose: () => void; onchanged: (visit: Visit) => void } = $props();
-
-  const CATEGORY_NAMES: Record<Category, string> = {
-    birds: "Birds",
-    other_animals: "Other animals",
-    other: "Other",
-  };
 
   interface Other {
     label: string;
@@ -55,7 +49,8 @@
     error = null;
     try {
       const { undo_token } = await send<{ undo_token: string }>("PATCH", `/api/visits/${visit.id}`, body);
-      showToast(category !== visit.category ? `Moved to ${CATEGORY_NAMES[category]}` : `Changed to ${label}`, undo_token);
+      showToast(correctionText(visit.category, category, label), undo_token);
+      noteChanged();
       onchanged(visit);
       onclose();
     } catch (e) {

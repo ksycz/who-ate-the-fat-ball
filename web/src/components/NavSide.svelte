@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { getJSON, type Status } from "../lib/api";
   import { route } from "../lib/router";
-  import { canEdit, noteServerDay } from "../lib/session";
+  import { canEdit, changes, noteServerDay } from "../lib/session";
   import { link } from "../lib/link";
   import Logo from "./Logo.svelte";
   import CameraStatus from "./CameraStatus.svelte";
@@ -26,7 +26,16 @@
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") load();
     }, 30_000);
-    return () => clearInterval(timer);
+    // The counts follow corrections and undos.
+    let first = true;
+    const stop = changes.subscribe(() => {
+      if (first) first = false;
+      else load();
+    });
+    return () => {
+      clearInterval(timer);
+      stop();
+    };
   });
 
   const name = $derived($route.name);
