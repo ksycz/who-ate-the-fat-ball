@@ -96,7 +96,7 @@ def match(
     if ranked and ranked[0][1] >= SURE_SHARE:
         label, share = ranked[0]
         winners = [c for c, n in zip(voters, nearest, strict=True) if n == label]
-        return Verdict(category_for(label), label, share, guesses, "species", _best(winners))
+        return Verdict(category_for(label), label, share, guesses, "species", _best(winners) or _best(voters))
 
     if species_ranked:
         category, confidence = category_for(species_ranked[0][0]), ranked[0][1]

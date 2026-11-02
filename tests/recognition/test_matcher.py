@@ -110,11 +110,13 @@ def test_guesses_top3_sorted():
 
     first = Crop(0, Detection("animal", 0.9, BOX), leaning(GREAT, BLUE, SPARROW, FOX))
     second = Crop(1, Detection("animal", 0.5, BOX), leaning(GREAT, SPARROW, BLUE, FOX))
-    v = match([first, second], ex, category_for)
+    third = Crop(2, Detection("animal", 0.3, BOX), leaning(FOX, GREAT, BLUE, SPARROW))
+    v = match([first, second, third], ex, category_for)
     assert [g for g, _ in v.guesses] == [GREAT, BLUE, SPARROW]
+    assert FOX not in dict(v.guesses)
     shares = [s for _, s in v.guesses]
     assert shares == sorted(shares, reverse=True)
-    assert abs(sum(shares) - 1.0) < 1e-6
+    assert sum(shares) < 1.0  # the fourth label took the rest
 
 
 def test_best_crop_is_largest_confident_winner():
@@ -125,3 +127,13 @@ def test_best_crop_is_largest_confident_winner():
     v = match([small, big, huge_loser], ex, category_for)
     assert v.species == GREAT
     assert v.best is big
+
+
+def test_species_verdict_always_has_best_crop():
+    # B wins on neighbours 2..K while every crop's own top-1 is A.
+    ex = examples(GREAT, 1) + examples(BLUE, 4, clip_id=2)
+    q = vec(GREAT) + vec(BLUE) * 0.5
+    c = Crop(0, Detection("animal", 0.9, BOX), (q / np.linalg.norm(q)).astype(np.float32))
+    v = match([c], ex, category_for)
+    assert (v.subject, v.species) == ("species", BLUE)
+    assert v.best is c
