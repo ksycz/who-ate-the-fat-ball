@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { route } from "./lib/router";
-  import Logo from "./components/Logo.svelte";
+  import { loadSession } from "./lib/session";
+  import NavPhone from "./components/NavPhone.svelte";
+  import NavSide from "./components/NavSide.svelte";
   import Today from "./pages/Today.svelte";
   import Visit from "./pages/Visit.svelte";
   import Birds from "./pages/Birds.svelte";
@@ -28,22 +31,31 @@
   } as const;
 
   const Page = $derived(pages[$route.name]);
+
+  onMount(() => {
+    loadSession();
+  });
 </script>
 
-<main data-route={$route.name}>
-  <header><Logo size={32} /></header>
-  <Page />
-  <p class="route">{$route.name}</p>
-</main>
+<div class="shell">
+  <NavSide />
+  <main data-route={$route.name}>
+    <Page />
+  </main>
+  <NavPhone />
+</div>
 
 <style>
+  .shell { display: flex; min-height: 100vh; }
   main {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
     max-width: 640px;
     margin: 0 auto;
-    padding: 16px;
+    padding: 0 20px 96px;
   }
-  .route {
-    font-size: 11px;
-    color: var(--olive);
+  @media (min-width: 768px) {
+    main { max-width: 760px; padding: 28px 32px 40px; }
   }
 </style>

@@ -93,3 +93,20 @@ describe("cameraStatus", () => {
       .toBe("Camera not seen yet · Check App status");
   });
 });
+
+describe("clipBadge without a duration", () => {
+  it("shows just the clip count", async () => {
+    const { clipBadge } = await import("../src/lib/format");
+    expect(clipBadge(null, 3)).toBe("▶ 3 clips");
+    expect(clipBadge(null, 1)).toBe("▶ 1 clip");
+  });
+});
+
+describe("whenText", () => {
+  it("says today, yesterday or the date", async () => {
+    const { whenText } = await import("../src/lib/format");
+    expect(whenText("2026-11-03T06:10:00+01:00", "2026-11-03")).toBe("06:10");
+    expect(whenText("2026-11-02T16:20:00+01:00", "2026-11-03")).toBe("yesterday 16:20");
+    expect(whenText("2026-10-20T16:20:00+01:00", "2026-11-03")).toBe("20 Oct 16:20");
+  });
+});

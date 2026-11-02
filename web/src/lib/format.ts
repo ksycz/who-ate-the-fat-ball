@@ -29,6 +29,7 @@ function nowWall(now: Date): Wall {
   };
 }
 
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (w: Wall) => `${pad(w.hh)}:${pad(w.mm)}`;
 const dayKey = (w: Wall) => `${w.y}-${pad(w.m)}-${pad(w.d)}`;
@@ -60,16 +61,33 @@ export function durationText(seconds: number): string {
   return `${Math.floor(s / 60)}:${pad(s % 60)}`;
 }
 
-export function clipBadge(durationS: number, clipCount: number): string {
-  return `▶ ${durationText(durationS)} · ${clipCount} ${clipCount === 1 ? "clip" : "clips"}`;
+export function clipBadge(durationS: number | null, clipCount: number): string {
+  const clips = `${clipCount} ${clipCount === 1 ? "clip" : "clips"}`;
+  return durationS === null ? `▶ ${clips}` : `▶ ${durationText(durationS)} · ${clips}`;
+}
+
+// "09:12" from a timestamp, read as written.
+export function timeOfDay(at: string): string {
+  return clock(parseWall(at));
+}
+
+// "06:10", "yesterday 16:20" or "20 Oct 16:20", judged against the server's day.
+export function whenText(at: string, today: string): string {
+  const w = parseWall(at);
+  const when = dayLabel(w, today);
+  if (when === "today") return clock(w);
+  if (when === "yesterday") return `yesterday ${clock(w)}`;
+  return `${w.d} ${MONTHS[w.m - 1]} ${clock(w)}`;
+}
+
+export function speciesLabel(s: { name: string | null; scientific: string }): string {
+  return capitalise(s.name ?? s.scientific);
 }
 
 export function sureChip(confidence: number | null): string | null {
   if (confidence === null) return null;
   return `${Math.min(99, Math.round(confidence * 100))}% sure`;
 }
-
-const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function visitName(visit: Visit): string {
   if (visit.species) return capitalise(visit.species.name ?? visit.species.scientific);
