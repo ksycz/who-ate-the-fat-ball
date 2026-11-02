@@ -514,6 +514,16 @@ def sorted_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {**counts, "favourites": favourites}
 
 
+def species_overview(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every species in the catalog with its visit count and last sighting: birds first, then most visits, then name."""
+    return conn.execute(
+        "SELECT s.scientific_name, n.name, s.\"group\" AS grp, COUNT(v.id) AS visits, MAX(v.started_at) AS last_seen_at "
+        "FROM species s LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+        "LEFT JOIN visit v ON v.species_id = s.id GROUP BY s.id "
+        "ORDER BY (s.\"group\" != 'bird'), visits DESC, n.name, s.id"
+    ).fetchall()
+
+
 def get_visit(conn: sqlite3.Connection, visit_id: int) -> sqlite3.Row | None:
     return conn.execute(f"{_VISIT_SELECT}WHERE v.id = ?", (visit_id,)).fetchone()
 

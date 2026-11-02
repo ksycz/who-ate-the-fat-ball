@@ -17,7 +17,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import corrections, db, repo
+from fatball.library import corrections, db, repo, today
 
 RECENT = timedelta(hours=1)
 # Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
@@ -94,6 +94,11 @@ def _visit_json(row: sqlite3.Row) -> dict:
         "is_favourite": bool(row["is_favourite"]),
         "best_frame_url": _media_url(row["best_frame_path"]),
         "clip_count": row["clip_count"],
+        "duration_s": row["duration_s"],
+        "poster_url": _media_url(row["poster_path"]),
+        "preview_url": _media_url(row["preview_path"]),
+        "corrected": bool(row["corrected"]),
+        "watched": row["watched_at"] is not None,
     }
 
 
@@ -133,23 +138,65 @@ def create_app(
 
     Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
+    def camera_json(conn: sqlite3.Connection) -> dict:
+        cam = repo.get_camera(conn)
+        return {
+            "state": _camera_state(cam, now().astimezone()),
+            "last_seen_at": cam.last_seen_at.isoformat() if cam and cam.last_seen_at else None,
+            "last_error": cam.last_error if cam else None,
+        }
+
+    def can_retry(clip: repo.Clip) -> bool:
+        """A ready clip can be recognised again; a failed one can be converted again while its raw file exists."""
+        if clip.status == "ready":
+            return True
+        return clip.status == "failed" and bool(clip.raw_path) and (settings.media_dir / clip.raw_path).is_file()
+
     @app.get("/api/status")
     def status(conn: Conn):
-        current = now().astimezone()
-        cam = repo.get_camera(conn)
         free = shutil.disk_usage(settings.data_dir).free
         return {
-            "camera": {
-                "state": _camera_state(cam, current),
-                "last_seen_at": cam.last_seen_at.isoformat() if cam and cam.last_seen_at else None,
-                "last_error": cam.last_error if cam else None,
-            },
+            "camera": camera_json(conn),
+            "sorted": repo.sorted_counts(conn),
             "queue": repo.queue_counts(conn),
             "recognition": {
                 **repo.recognition_counts(conn), "model": model_loaded(), "examples": repo.example_count(conn),
             },
             "disk": {"free_bytes": free, "low": free < settings.min_free_bytes},
         }
+
+    @app.get("/api/today")
+    def today_page(conn: Conn):
+        day = now().astimezone().date()
+        champ = today.champion(conn, day)
+        return {
+            "day": day.isoformat(),
+            "summary": today.summary(conn, day),
+            "champion": (
+                {**{k: v for k, v in champ.items() if k != "best_frame_path"},
+                 "best_frame_url": _media_url(champ["best_frame_path"])}
+                if champ else None
+            ),
+            "new_species": today.new_species(conn),
+            "visits": [_visit_json(r) for r in repo.list_visits(conn, 100_000, day=day)],
+            "checking": [_clip_json(c) for c in today.checking(conn, day)],
+            "failed": [
+                {"clip_id": c.id, "begin_at": c.begin_at.isoformat(), "can_retry": can_retry(c)}
+                for c in today.failed(conn, day)
+            ],
+            "last_visitor": today.last_visitor(conn, day),
+            "camera": camera_json(conn),
+        }
+
+    @app.get("/api/species")
+    def species_list(conn: Conn):
+        return [
+            {
+                "scientific": r["scientific_name"], "name": r["name"], "group": r["grp"],
+                "visits": r["visits"], "last_seen_at": r["last_seen_at"],
+            }
+            for r in repo.species_overview(conn)
+        ]
 
     @app.get("/api/clips")
     def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
@@ -164,10 +211,13 @@ def create_app(
         category: Literal["birds", "other_animals", "other"] | None = None,
         species: str | None = None,
         day: date | None = None,
+        favourite: bool | None = None,
     ):
         """Newest first. `day` is the local date of the visit's start (as stored)."""
         after = _decode_cursor(cursor) if cursor else None
-        rows = repo.list_visits(conn, limit + 1, after=after, category=category, species=species, day=day)
+        rows = repo.list_visits(
+            conn, limit + 1, after=after, category=category, species=species, day=day, favourite=favourite,
+        )
         page = rows[:limit]
         return {
             "items": [_visit_json(r) for r in page],
@@ -187,6 +237,12 @@ def create_app(
                 for g in repo.visit_guesses(conn, visit_id)
             ],
         }
+
+    @app.post("/api/visits/{visit_id}/watched", status_code=204)
+    def watched(visit_id: int, conn: Conn):
+        """Watching is viewing, so no PIN: it only clears the new-species banner."""
+        if not today.mark_watched(conn, visit_id, now().astimezone()):
+            raise HTTPException(status_code=404)
 
     @app.patch("/api/visits/{visit_id}", dependencies=[Depends(auth_mod.require_editor)])
     def patch_visit(visit_id: int, body: VisitPatch, conn: Conn):
@@ -211,13 +267,16 @@ def create_app(
 
     @app.post("/api/retry/{clip_id}", status_code=204, dependencies=[Depends(auth_mod.require_editor)])
     def retry(clip_id: int, conn: Conn):
-        """Recognise a ready clip again. 409 for a clip that isn't ready: there is nothing to recognise yet."""
+        """Recognise a ready clip again, or convert a failed one again while its raw file exists; 409 otherwise."""
         clip = repo.get_clip(conn, clip_id)
         if clip is None:
             raise HTTPException(status_code=404)
-        if clip.status != "ready":
-            raise HTTPException(status_code=409, detail=f"clip is {clip.status}, not ready")
-        repo.requeue_recognition(conn, clip_id)
+        if not can_retry(clip):
+            raise HTTPException(status_code=409, detail=f"clip is {clip.status} and cannot be retried")
+        if clip.status == "failed":
+            repo.set_clip_status(conn, clip_id, "downloaded")
+        else:
+            repo.requeue_recognition(conn, clip_id)
 
     @app.get("/media/{path:path}")
     def media(path: str):
