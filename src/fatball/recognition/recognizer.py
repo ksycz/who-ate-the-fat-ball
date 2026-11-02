@@ -83,7 +83,7 @@ class Recognizer:
         with objc.autorelease_pool():
             for index, frame in enumerate(frames):
                 for det in self.detector.detect(frame):
-                    if det.cls == "vehicle":
+                    if det.cls == "vehicle" or _no_area(det.box):
                         continue
                     feature = None
                     if det.cls == "animal" and det.conf >= DET_MIN:
@@ -92,3 +92,8 @@ class Recognizer:
                     rows.append(NewDetection(index, det.cls, det.conf, det.box,
                                              None if feature is None else to_blob(feature)))
         return crops, rows
+
+
+def _no_area(box: tuple[float, float, float, float]) -> bool:
+    """A box with no area can't be cropped or feature-printed; skip it rather than fail the clip."""
+    return box[2] - box[0] <= 0 or box[3] - box[1] <= 0

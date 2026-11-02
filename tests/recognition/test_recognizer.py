@@ -175,3 +175,14 @@ def test_verdict_to_json_shape(setup):
 
 def test_set_background_priority_returns_bool():
     assert isinstance(qos.set_background_priority(), bool)
+
+
+def test_zero_area_box_does_not_fail_the_clip(setup):
+    settings, conn, clip = setup
+    flat = Detection("animal", 0.9, (0.4654, 0.0, 0.8525, 0.0))
+    spy = Spy()
+    Recognizer(settings, conn, FakeDetector({2: [flat, _animal(0.8)]}), spy).recognize(clip)
+
+    rows = conn.execute("SELECT feature FROM detection WHERE clip_id = ?", (clip.id,)).fetchall()
+    assert len(rows) == 1 and rows[0]["feature"] is not None
+    assert [box for _, box in spy.calls] == [BOX]

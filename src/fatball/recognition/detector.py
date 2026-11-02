@@ -49,6 +49,9 @@ def letterbox(image: Image.Image) -> Image.Image:
     return out
 
 
+MIN_BOX_SIDE = 1e-6  # normalised; a clipped box thinner than this has no area
+
+
 def decode(raw: np.ndarray, image_w: int, image_h: int, conf_min: float = 0.1) -> list[Detection]:
     """Turn the model's (N, 7) output into detections on the original image, best first."""
     rows = np.asarray(raw, dtype=np.float32).reshape(-1, 7)
@@ -71,6 +74,9 @@ def decode(raw: np.ndarray, image_w: int, image_h: int, conf_min: float = 0.1) -
         ],
         axis=1,
     ).clip(0.0, 1.0)
+    # A box wholly inside the letterbox padding clips to a line; it has no area to recognise.
+    has_area = ((boxes[:, 2] - boxes[:, 0]) > MIN_BOX_SIDE) & ((boxes[:, 3] - boxes[:, 1]) > MIN_BOX_SIDE)
+    boxes, conf, cls_idx = boxes[has_area], conf[has_area], cls_idx[has_area]
 
     detections = []
     for i in _nms(boxes, conf, cls_idx):

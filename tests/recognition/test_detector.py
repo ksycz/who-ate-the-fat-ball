@@ -165,3 +165,11 @@ def test_compiled_model_is_cached_next_to_the_package_until_it_changes(tmp_path)
     second = compiled_model(package, compile_fn)
     assert len(compiles) == 2 and second != first
     assert not first.exists()  # the stale compiled copy is removed
+
+
+def test_decode_drops_boxes_with_no_area_after_clipping():
+    # 1280x720: the image spans y 140..500 of the 640 input. Row 1 lies wholly in the top padding, so it clips to
+    # zero height; row 2 is a normal box.
+    raw = np.array([row(320, 100, 200, 60, animal=0.9), row(320, 320, 64, 36, animal=0.8)], dtype=np.float32)
+    [det] = decode(raw, 1280, 720)
+    assert det.conf == pytest.approx(0.8)
