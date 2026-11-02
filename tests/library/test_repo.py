@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -254,3 +255,12 @@ def test_scientific_name_for_english_any_case_or_scientific(conn):
     assert repo.scientific_name_for(conn, "great tit") == "Parus major"
     assert repo.scientific_name_for(conn, "Parus major") == "Parus major"
     assert repo.scientific_name_for(conn, "unicorn") is None
+
+
+def test_replace_detections_is_all_or_nothing(conn, cam):
+    clip = _add(conn, cam)
+    repo.replace_detections(conn, clip, [repo.NewDetection(0, "animal", 0.9, (0, 0, 1, 1))])
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.replace_detections(conn, clip, [repo.NewDetection(0, "animal", 0.8, (0, 0, 1, 1)),
+                                             repo.NewDetection(1, None, 0.5, (0, 0, 1, 1))])  # cls is NOT NULL
+    assert [r[0] for r in conn.execute("SELECT conf FROM detection")] == [0.9]

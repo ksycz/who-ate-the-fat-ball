@@ -269,14 +269,27 @@ class NewDetection:
 
 
 def replace_detections(conn: sqlite3.Connection, clip_id: int, rows: Iterable[NewDetection]) -> None:
-    """Swap the clip's unlabelled detections for `rows`; labelled ones are never deleted."""
-    conn.execute("DELETE FROM detection WHERE clip_id = ? AND label IS NULL", (clip_id,))
-    conn.executemany(
-        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [(clip_id, r.frame_index, r.cls, r.conf, *r.box, r.feature) for r in rows],
-    )
-    conn.commit()
+    """Swap the clip's unlabelled detections for `rows`, all or nothing. Labelled ones are never deleted, and a
+    row the clip already holds labelled (same frame, class, confidence and box: a retry) is not added again."""
+    with conn:
+        labelled = {
+            _detection_key(r["frame_index"], r["cls"], r["conf"], (r["x1"], r["y1"], r["x2"], r["y2"]))
+            for r in conn.execute(
+                "SELECT frame_index, cls, conf, x1, y1, x2, y2 FROM detection WHERE clip_id = ? AND label IS NOT NULL",
+                (clip_id,),
+            )
+        }
+        conn.execute("DELETE FROM detection WHERE clip_id = ? AND label IS NULL", (clip_id,))
+        conn.executemany(
+            "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(clip_id, r.frame_index, r.cls, r.conf, *r.box, r.feature) for r in rows
+             if _detection_key(r.frame_index, r.cls, r.conf, r.box) not in labelled],
+        )
+
+
+def _detection_key(frame_index: int, cls: str, conf: float, box) -> tuple:
+    return (frame_index, cls, round(conf, 6), *(round(v, 6) for v in box))
 
 
 def examples(conn: sqlite3.Connection) -> list[Example]:
@@ -285,6 +298,19 @@ def examples(conn: sqlite3.Connection) -> list[Example]:
         "SELECT label, feature, clip_id FROM detection WHERE label IS NOT NULL AND feature IS NOT NULL ORDER BY id"
     )
     return [Example(r["label"], from_blob(r["feature"]), r["clip_id"]) for r in rows]
+
+
+def examples_version(conn: sqlite3.Connection) -> tuple[int, str | None]:
+    """(how many examples, latest label time): changes whenever examples are added, removed or relabelled,
+    so a cached copy of `examples` can tell it is stale without reading the features."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, MAX(labelled_at) AS latest FROM detection WHERE label IS NOT NULL AND feature IS NOT NULL"
+    ).fetchone()
+    return row["n"], row["latest"]
+
+
+def example_count(conn: sqlite3.Connection) -> int:
+    return examples_version(conn)[0]
 
 
 def set_recognition(

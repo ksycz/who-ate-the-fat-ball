@@ -216,6 +216,7 @@ def test_downloaded_clip_is_recognised_and_in_a_visit(settings, conn, xm_clip_by
 
 
 def test_backfill_does_one_clip_per_pass_oldest_first(settings, conn):
+    _teach_great_tit(conn)
     late, early, mid = _ready_clip(conn, 15), _ready_clip(conn, 8), _ready_clip(conn, 11)
     stub = StubRecognizer(conn)
     p = Processor(settings, conn, stub)
@@ -226,6 +227,7 @@ def test_backfill_does_one_clip_per_pass_oldest_first(settings, conn):
 
 
 def test_recognition_error_keeps_clip_playable(settings, conn, xm_clip_bytes, caplog):
+    _teach_great_tit(conn)
     clip_id, _ = _clip(conn, settings, xm_clip_bytes)
     stub = StubRecognizer(conn, fail=[clip_id])
     with caplog.at_level(logging.ERROR):
@@ -238,6 +240,7 @@ def test_recognition_error_keeps_clip_playable(settings, conn, xm_clip_bytes, ca
 
 
 def test_failed_clip_is_skipped_by_later_passes(settings, conn):
+    _teach_great_tit(conn)
     bad, good = _ready_clip(conn, 8), _ready_clip(conn, 9)
     stub = StubRecognizer(conn, fail=[bad])
     p = Processor(settings, conn, stub)
@@ -253,6 +256,22 @@ def test_missing_model_keeps_clips_ready_and_unrecognised(settings, conn, xm_cli
     assert _get(conn, clip_id).status == "ready"
     assert _recognition(conn, clip_id) == (None, None)
     assert repo.visit_for_clip(conn, clip_id) is None
+
+
+def test_no_examples_keeps_clips_ready_and_pending(settings, conn, xm_clip_bytes):
+    repo.ensure_catalog(conn)
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    p = Processor(settings, conn, _real_recognizer(settings, conn))
+    assert p.process_pending() == 1
+    assert _get(conn, clip_id).status == "ready"
+    assert _recognition(conn, clip_id) == (None, None) and repo.visit_for_clip(conn, clip_id) is None
+    assert repo.recognition_counts(conn)["pending"] == 1
+    _teach_great_tit(conn)
+    p.process_pending()  # the backfill picks it up once there is an example
+    visit_id = repo.visit_for_clip(conn, clip_id)
+    assert visit_id is not None
+    assert conn.execute("SELECT s.scientific_name FROM visit v JOIN species s ON s.id = v.species_id "
+                        "WHERE v.id = ?", (visit_id,)).fetchone()[0] == GREAT_TIT
 
 
 def test_model_appearing_later_starts_recognition(settings, conn, xm_clip_bytes, caplog):
@@ -282,6 +301,7 @@ def test_loader_failure_is_survived(settings, conn, xm_clip_bytes):
 
 
 def test_photos_are_never_recognised(settings, conn, monkeypatch):
+    _teach_great_tit(conn)
     monkeypatch.setattr(processor_mod, "extract_jpeg", lambda raw: b"\xff\xd8jpeg\xff\xd9")
     clip_id, _ = _clip(conn, settings, b"raw", kind="jpg")
     stub = StubRecognizer(conn)

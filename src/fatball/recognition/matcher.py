@@ -34,6 +34,26 @@ class Example:
     clip_id: int
 
 
+@dataclass(frozen=True, eq=False)
+class ExampleMatrix:
+    """The examples stacked once into one float32 matrix (one row per example), so a caller can keep it
+    between clips instead of rebuilding it from the library every time."""
+
+    labels: np.ndarray  # (n,) object
+    clip_ids: np.ndarray  # (n,) int64
+    matrix: np.ndarray  # (n, d) float32
+
+    @classmethod
+    def of(cls, examples: list[Example]) -> "ExampleMatrix":
+        if not examples:
+            return cls(np.array([], dtype=object), np.array([], dtype=np.int64), np.zeros((0, 0), np.float32))
+        return cls(
+            np.array([e.label for e in examples], dtype=object),
+            np.array([e.clip_id for e in examples], dtype=np.int64),
+            np.stack([np.asarray(e.feature, dtype=np.float32) for e in examples]),
+        )
+
+
 @dataclass(frozen=True)
 class Verdict:
     category: str
@@ -55,7 +75,7 @@ def _best(crops: list[Crop]) -> Crop | None:
 
 def match(
     crops: list[Crop],
-    examples: list[Example],
+    examples: list[Example] | ExampleMatrix,
     category_for: Callable[[str | None], str],
     *,
     exclude_clip: int | None = None,
@@ -68,16 +88,18 @@ def match(
     if not animals:
         return Verdict(category_for(None), None, 1.0, [], "nothing", None)
 
-    usable = [e for e in examples if e.clip_id != exclude_clip]
+    known = examples if isinstance(examples, ExampleMatrix) else ExampleMatrix.of(examples)
+    own = known.clip_ids == exclude_clip if exclude_clip is not None else np.zeros(len(known.labels), dtype=bool)
+    n_usable = int(len(known.labels) - own.sum())
     voters = [c for c in animals if c.feature is not None]
     weights: dict[str, float] = defaultdict(float)
     nearest: list[str] = []  # each voter's own top-1 label, aligned with `voters`
-    if usable and voters:
-        labels = np.array([e.label for e in usable], dtype=object)
-        matrix = np.stack([np.asarray(e.feature, dtype=np.float32) for e in usable])
+    if n_usable and voters:
+        labels = known.labels
         queries = np.stack([np.asarray(c.feature, dtype=np.float32) for c in voters])
-        sims = queries @ matrix.T  # (voters, examples)
-        k = min(K, len(usable))
+        sims = queries @ known.matrix.T  # (voters, examples)
+        sims[:, own] = -np.inf  # the clip's own examples never vote (no copy of the matrix is made)
+        k = min(K, n_usable)
         order = np.argsort(-sims, axis=1, kind="stable")[:, :k]
         for crop, row in zip(voters, order, strict=True):
             nearest.append(str(labels[row[0]]))

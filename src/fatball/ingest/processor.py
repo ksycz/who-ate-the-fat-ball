@@ -25,7 +25,9 @@ log = logging.getLogger(__name__)
 class Processor:
     """Converts downloaded clips, recognises them and backfills old ones, one clip at a time.
 
-    Recognition is off when neither `recognizer` nor `detector_loader` is given. A `detector_loader`
+    Recognition is off when neither `recognizer` nor `detector_loader` is given, and waits while the
+    library has no examples yet: every clip would come out "unknown" and never be looked at again, so clips
+    go ready and stay pending until the owner imports or corrects one (then the backfill catches up). A `detector_loader`
     returns a detector or None (the model file is not there yet); while no detector is loaded it is
     called again on every pass, so a model that appears later starts recognition without a restart. A
     missing model is logged once, not every pass.
@@ -46,6 +48,7 @@ class Processor:
         self._detector_loader = detector_loader
         self._features = features
         self._warned_no_model = False
+        self._warned_no_examples = False
         # A crash mid-conversion leaves clips in "processing": retry them.
         for clip in repo.clips_with_status(conn, "processing"):
             repo.set_clip_status(conn, clip.id, "downloaded")
@@ -80,6 +83,8 @@ class Processor:
         else claimed is skipped and the raw_path used is the one stored now, not the listing's.
         """
         recognizer = self._current_recognizer()
+        if recognizer is not None and not self._has_examples():
+            recognizer = None
         attempted = 0
         for listed in repo.clips_with_status(self.conn, "downloaded"):
             clip = repo.claim_for_processing(self.conn, listed.id)
@@ -100,14 +105,17 @@ class Processor:
                 self._recognize(recognizer, clip)
         return attempted
 
+    def _has_examples(self) -> bool:
+        if repo.example_count(self.conn) > 0:
+            self._warned_no_examples = False
+            return True
+        if not self._warned_no_examples:
+            self._warned_no_examples = True
+            log.warning("no examples yet (run `fatball examples-import`); clips stay unrecognised until there are")
+        return False
+
     def _recognize(self, recognizer: Recognizer, clip: Clip) -> None:
-        """Recognise and group one clip. A failure is recorded on the clip and never stops anything else."""
-        try:
-            verdict = recognizer.recognize(clip)
-            visits.assign_visit(self.conn, clip, verdict)
-        except Exception as e:
-            log.exception("recognising clip %s failed; the video is kept", clip.id)
-            repo.set_recognition_error(self.conn, clip.id, f"{type(e).__name__}: {e}"[:200])
+        recognize_and_group(self.conn, recognizer, clip)
 
     def _rel(self, path: Path) -> str:
         return path.relative_to(self.settings.media_dir).as_posix()
@@ -130,3 +138,17 @@ class Processor:
             "preview_path": self._rel(out.preview),
             "duration_s": out.duration_s,
         }
+
+
+def recognize_and_group(conn: sqlite3.Connection, recognizer: Recognizer, clip: Clip) -> str | None:
+    """Recognise one clip and put it in a visit. A failure is recorded on the clip (and returned), never raised,
+    so it stops nothing else. The processor and `fatball examples-import` both go through here."""
+    try:
+        verdict = recognizer.recognize(clip)
+        visits.assign_visit(conn, clip, verdict)
+    except Exception as e:
+        log.exception("recognising clip %s failed; the video is kept", clip.id)
+        message = f"{type(e).__name__}: {e}"[:200]
+        repo.set_recognition_error(conn, clip.id, message)
+        return message
+    return None

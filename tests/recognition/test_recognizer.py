@@ -134,6 +134,38 @@ def test_rerecognize_keeps_labelled_detections(setup):
     assert [(r["id"] == first, r["conf"], r["label"]) for r in rows] == [(True, 0.9, GREAT_TIT), (False, 0.7, None)]
 
 
+def test_rerecognize_adds_no_duplicate_of_a_labelled_detection(setup):
+    settings, conn, clip = setup
+    Recognizer(settings, conn, FakeDetector({0: [_animal(), _animal(0.5)]}), Spy()).recognize(clip)
+    first = conn.execute("SELECT id FROM detection ORDER BY id LIMIT 1").fetchone()[0]
+    conn.execute("UPDATE detection SET label = ? WHERE id = ?", (GREAT_TIT, first))
+    conn.commit()
+    Recognizer(settings, conn, FakeDetector({0: [_animal(), _animal(0.5)]}), Spy()).recognize(clip)  # a retry
+    rows = conn.execute("SELECT id, conf, label FROM detection ORDER BY id").fetchall()
+    assert [(r["id"] == first, r["conf"], r["label"]) for r in rows] == [(True, 0.9, GREAT_TIT), (False, 0.5, None)]
+
+
+def test_examples_are_loaded_once_until_labels_change(setup, monkeypatch):
+    settings, conn, clip = setup
+    other = repo.add_clip(conn, 1, "/b.h265", datetime(2026, 10, 30, 9), datetime(2026, 10, 30, 9, 0, 4), "video", 1)
+    conn.execute(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label, labelled_at) "
+        "VALUES (?, 0, 'animal', 0.9, 0, 0, 1, 1, ?, ?, 'T')",
+        (other, np.array([1.0, 0.0], dtype=np.float32).tobytes(), GREAT_TIT),
+    )
+    conn.commit()
+    loads = []
+    real = repo.examples
+    monkeypatch.setattr(repo, "examples", lambda c: loads.append(1) or real(c))
+    recognizer = Recognizer(settings, conn, FakeDetector(lambda i: [_animal()]), Spy())
+    assert recognizer.recognize(clip).species == GREAT_TIT
+    recognizer.recognize(clip)
+    assert len(loads) == 1
+    repo.label_detections(conn, clip.id, GREAT_TIT, "import")  # new examples: the cache is stale
+    recognizer.recognize(clip)
+    assert len(loads) == 2
+
+
 def test_verdict_to_json_shape(setup):
     settings, conn, clip = setup
     verdict = Recognizer(settings, conn, FakeDetector({}), Spy()).recognize(clip)

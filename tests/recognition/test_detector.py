@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fatball.recognition.detector import Detection, Detector, ModelMissing, decode
+from fatball.recognition.detector import Detection, Detector, ModelMissing, compiled_model, decode
 
 
 def row(cx, cy, w, h, animal=0.0, person=0.0, vehicle=0.0):
@@ -80,3 +80,33 @@ def test_detector_on_real_model(tmp_path):
     result = detector.detect(frame)
     assert isinstance(result, list)
     assert time.perf_counter() - start < 0.5
+
+
+def _package(tmp_path):
+    package = tmp_path / "models" / "md.mlpackage"
+    package.mkdir(parents=True)
+    (package / "Manifest.json").write_text("{}")
+    return package
+
+
+def test_compiled_model_is_cached_next_to_the_package_until_it_changes(tmp_path):
+    package = _package(tmp_path)
+    scratch = tmp_path / "tmp"
+    compiles = []
+
+    def compile_fn(path):
+        out = scratch / f"c{len(compiles)}.mlmodelc"
+        out.mkdir(parents=True)
+        (out / "model.mil").write_text(str(len(compiles)))
+        compiles.append(path)
+        return out
+
+    first = compiled_model(package, compile_fn)
+    assert compiled_model(package, compile_fn) == first
+    assert len(compiles) == 1 and first.parent == package.parent and (first / "model.mil").exists()
+    assert list(scratch.iterdir()) == []  # moved out of the temporary folder, not copied
+    later = (package / "Manifest.json").stat().st_mtime_ns + 5_000_000_000
+    os.utime(package / "Manifest.json", ns=(later, later))  # the model was exported again
+    second = compiled_model(package, compile_fn)
+    assert len(compiles) == 2 and second != first
+    assert not first.exists()  # the stale compiled copy is removed

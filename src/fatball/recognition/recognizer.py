@@ -14,7 +14,7 @@ from fatball.library.repo import Clip, NewDetection
 from fatball.media.convert import extract_frames
 from fatball.recognition.detector import Detection
 from fatball.recognition.features import feature_print, to_blob
-from fatball.recognition.matcher import DET_MIN, Crop, Verdict, match
+from fatball.recognition.matcher import DET_MIN, Crop, ExampleMatrix, Verdict, match
 
 
 class DetectorLike(Protocol):
@@ -37,6 +37,17 @@ class Recognizer:
         self.conn = conn
         self.detector = detector
         self.features = features
+        self._examples: ExampleMatrix | None = None
+        self._examples_version: tuple | None = None
+
+    def examples(self) -> ExampleMatrix:
+        """The library's examples as one matrix, rebuilt only when labels have changed since the last clip."""
+        version = repo.examples_version(self.conn)
+        if self._examples is None or version != self._examples_version:
+            self._examples = None  # let the old matrix go before the new one is built
+            self._examples = ExampleMatrix.of(repo.examples(self.conn))
+            self._examples_version = version
+        return self._examples
 
     def recognize(self, clip: Clip) -> Verdict:
         if not clip.web_path:
@@ -48,7 +59,7 @@ class Recognizer:
             repo.replace_detections(self.conn, clip.id, rows)
             verdict = match(
                 crops,
-                repo.examples(self.conn),
+                self.examples(),
                 lambda name: repo.category_for(self.conn, name),
                 exclude_clip=clip.id,
             )

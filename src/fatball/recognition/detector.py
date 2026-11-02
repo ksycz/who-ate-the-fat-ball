@@ -5,6 +5,9 @@ The model is built by scripts/export_detector.py. It returns one row per anchor,
 Vision letterboxes the frame into the square input (scale to fit, centred); `decode` undoes that.
 """
 
+import os
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -79,6 +82,32 @@ def _iou(a: np.ndarray, b: np.ndarray) -> float:
     return float(inter / union)
 
 
+def compiled_model(model_path: Path, compile_fn: Callable[[Path], Path]) -> Path:
+    """The compiled `.mlmodelc` for the package, cached next to it and keyed by the package's newest mtime.
+
+    Core ML compiles into $TMPDIR and never cleans up, so compiling on every load would pile copies up there.
+    `compile_fn(package)` returns the freshly compiled folder; it is moved next to the package, and compiled
+    copies of older versions are removed."""
+    stamp = max(f.stat().st_mtime_ns for f in [model_path, *model_path.rglob("*")])
+    stem = model_path.name.removesuffix(".mlpackage")
+    cached = model_path.with_name(f"{stem}.{stamp}.mlmodelc")
+    if not cached.exists():
+        fresh = Path(compile_fn(model_path))
+        partial = cached.with_name(f"{cached.name}.partial-{os.getpid()}")
+        shutil.rmtree(partial, ignore_errors=True)
+        shutil.move(fresh, partial)
+        try:
+            os.replace(partial, cached)  # a crash mid-move leaves only a .partial folder, never a broken cache
+        except OSError:
+            if not cached.exists():
+                raise
+            shutil.rmtree(partial, ignore_errors=True)  # another process cached the same version first
+    for old in model_path.parent.glob(f"{stem}.*.mlmodelc*"):
+        if not old.name.startswith(cached.name):  # older versions only, never another process's partial copy
+            shutil.rmtree(old, ignore_errors=True)
+    return cached
+
+
 class Detector:
     def __init__(self, model_path: Path):
         model_path = Path(model_path)
@@ -90,10 +119,15 @@ class Detector:
         from Foundation import NSURL
 
         self._CoreML, self._Vision, self._NSURL = CoreML, Vision, NSURL
-        compiled_url, error = CoreML.MLModel.compileModelAtURL_error_(NSURL.fileURLWithPath_(str(model_path)), None)
-        if compiled_url is None:
-            raise ModelMissing(f"could not compile {model_path}: {error}")
-        ml_model, error = CoreML.MLModel.modelWithContentsOfURL_error_(compiled_url, None)
+
+        def compile_fn(package: Path) -> Path:
+            url, error = CoreML.MLModel.compileModelAtURL_error_(NSURL.fileURLWithPath_(str(package)), None)
+            if url is None:
+                raise ModelMissing(f"could not compile {package}: {error}")
+            return Path(url.path())
+
+        compiled = compiled_model(model_path, compile_fn)
+        ml_model, error = CoreML.MLModel.modelWithContentsOfURL_error_(NSURL.fileURLWithPath_(str(compiled)), None)
         if ml_model is None:
             raise ModelMissing(f"could not load {model_path}: {error}")
         self._model, error = Vision.VNCoreMLModel.modelForMLModel_error_(ml_model, None)
