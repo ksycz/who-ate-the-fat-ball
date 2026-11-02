@@ -154,6 +154,8 @@ class Watcher:
             with self._connect(host, self.settings.camera_port, self._client_timeout,
                                silence_s=self._silence_s) as client:
                 client.login(CAMERA_USER, password)
+                if camera.last_error is not None:  # the login worked: don't show an old error while downloading
+                    repo.update_camera_status(self.conn, camera_id, clear_error=True)
                 clock_ok = self._fix_clock(client, camera_id, now)
                 files = self._unknown_files(client, now)
                 for f in files:

@@ -196,6 +196,22 @@ def test_partial_download_is_discarded_and_retried(tmp_path, conn, cam):
     assert repo.get_camera(conn).last_error is None
 
 
+def test_an_old_error_is_cleared_as_soon_as_the_login_works(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    w = _watcher(tmp_path, conn, cam, Clock(NOW))
+    repo.update_camera_status(conn, repo.get_camera(conn).id, last_error="wrong_password")
+    seen_while_downloading = []
+    download = w._download
+
+    def spy(client, camera_id, f):
+        seen_while_downloading.append(repo.get_camera(conn).last_error)
+        return download(client, camera_id, f)
+
+    w._download = spy
+    assert w.tick().downloaded == 1
+    assert seen_while_downloading == [None]
+
+
 def test_clock_fixed_when_off_by_more_than_two_minutes(tmp_path, conn, cam):
     cam.clock = NOW + timedelta(hours=7)
     clock = Clock(NOW)
