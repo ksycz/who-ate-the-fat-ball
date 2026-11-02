@@ -157,15 +157,19 @@ def test_moved_visit_needs_exact_species_and_keeps_owner_values(conn, cam):
     assert row["species_id"] == blue_id
 
 
-def test_first_seen_set_once_for_sure_species_only(conn, cam):
+def _first_seen(conn, species):
+    return conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (species,)).fetchone()[0]
+
+
+def test_first_seen_is_the_earliest_sure_clip_even_out_of_order(conn, cam):
     recognise(conn, cam, 0, unknown())
     assert conn.execute("SELECT COUNT(*) FROM species WHERE first_seen_at IS NOT NULL").fetchone()[0] == 0
-    recognise(conn, cam, 200, sure(GREAT))
-    first = conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (GREAT,)).fetchone()[0]
-    assert first == (T0 + timedelta(seconds=200)).astimezone().isoformat()
     recognise(conn, cam, 500, sure(GREAT))
-    again = conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (GREAT,)).fetchone()[0]
-    assert again == first
+    assert _first_seen(conn, GREAT) == (T0 + timedelta(seconds=500)).astimezone().isoformat()
+    recognise(conn, cam, 200, sure(GREAT))  # an older clip recognised later (the backfill)
+    assert _first_seen(conn, GREAT) == (T0 + timedelta(seconds=200)).astimezone().isoformat()
+    recognise(conn, cam, 900, sure(GREAT))
+    assert _first_seen(conn, GREAT) == (T0 + timedelta(seconds=200)).astimezone().isoformat()
     assert conn.execute("SELECT COUNT(*) FROM species WHERE first_seen_at IS NOT NULL").fetchone()[0] == 1
 
 
@@ -251,14 +255,51 @@ def test_unknown_first_visit_never_collapses_two_species(conn, cam):
     assert len(species) == 2
 
 
-def test_emptied_moved_visit_with_correction_is_deleted_with_its_rows(conn, cam):
+def test_re_recognised_clip_stays_in_its_owner_moved_visit_and_the_correction_survives(conn, cam):
     clip, v = recognise(conn, cam, 0, sure(GREAT))
-    conn.execute("UPDATE visit SET moved_by_user = 1 WHERE id = ?", (v,))
+    blue_id = conn.execute("SELECT id FROM species WHERE scientific_name = ?", (BLUE,)).fetchone()[0]
+    conn.execute("UPDATE visit SET moved_by_user = 1, species_id = ? WHERE id = ?", (blue_id, v))
     conn.execute("INSERT INTO correction(visit_id, created_at) VALUES (?, 'now')", (v,))
     conn.execute("INSERT INTO undo(token, visit_id, before_json, created_at) VALUES ('t', ?, '{}', 'now')", (v,))
     conn.commit()
-    new = assign_visit(conn, clip, sure(BLUE))  # re-recognised: the owner's visit empties and is deleted
-    assert conn.execute("SELECT moved_by_user FROM visit WHERE id = ?", (new,)).fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM correction").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM undo").fetchone()[0] == 0
+    again = assign_visit(conn, clip, sure(GREAT, 0.8))  # a retry: the matcher still says great tit
+    assert again == v
+    assert repo.visit_for_clip(conn, clip.id) == v
+    row = conn.execute("SELECT * FROM visit WHERE id = ?", (v,)).fetchone()
+    assert (row["moved_by_user"], row["species_id"], row["subject"]) == (1, blue_id, "species")
+    assert row["confidence"] == pytest.approx(0.8)  # derived fields are recomputed from the new verdict
+    assert conn.execute("SELECT COUNT(*) FROM correction").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM undo").fetchone()[0] == 1
     assert visit_count(conn) == 1
+
+
+def test_emptied_visit_is_deleted_with_its_undo_rows(conn, cam):
+    clip, v = recognise(conn, cam, 0, sure(GREAT))
+    # a favourite-only edit leaves an undo row without moving the visit
+    conn.execute("INSERT INTO undo(token, visit_id, before_json, created_at) VALUES ('t', ?, '{}', 'now')", (v,))
+    conn.commit()
+    new = assign_visit(conn, clip, sure(BLUE))
+    assert conn.execute("SELECT COUNT(*) FROM undo").fetchone()[0] == 0
+    assert repo.visit_for_clip(conn, clip.id) == new
+    assert visit_count(conn) == 1
+
+
+def test_merge_keeps_a_favourite(conn, cam):
+    _, a = recognise(conn, cam, 0, sure())
+    _, b = recognise(conn, cam, 100, sure())
+    conn.execute("UPDATE visit SET is_favourite = 1 WHERE id = ?", (b,))
+    conn.commit()
+    _, c = recognise(conn, cam, 50, sure())  # bridges the two: b merges into a
+    assert c == a and visit_count(conn) == 1
+    assert conn.execute("SELECT is_favourite FROM visit WHERE id = ?", (a,)).fetchone()[0] == 1
+
+
+def test_assign_visit_takes_the_write_lock_before_reading(conn, cam):
+    clip, _ = recognise(conn, cam, 0, sure())
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        assign_visit(conn, clip, sure(BLUE))
+    finally:
+        conn.set_trace_callback(None)
+    assert statements[0] == "BEGIN IMMEDIATE"

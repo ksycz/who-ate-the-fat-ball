@@ -145,7 +145,9 @@ def create_app(
                 "last_error": cam.last_error if cam else None,
             },
             "queue": repo.queue_counts(conn),
-            "recognition": {**repo.recognition_counts(conn), "model": model_loaded()},
+            "recognition": {
+                **repo.recognition_counts(conn), "model": model_loaded(), "examples": repo.example_count(conn),
+            },
             "disk": {"free_bytes": free, "low": free < settings.min_free_bytes},
         }
 
@@ -209,8 +211,13 @@ def create_app(
 
     @app.post("/api/retry/{clip_id}", status_code=204, dependencies=[Depends(auth_mod.require_editor)])
     def retry(clip_id: int, conn: Conn):
-        if not repo.requeue_recognition(conn, clip_id):
+        """Recognise a ready clip again. 409 for a clip that isn't ready: there is nothing to recognise yet."""
+        clip = repo.get_clip(conn, clip_id)
+        if clip is None:
             raise HTTPException(status_code=404)
+        if clip.status != "ready":
+            raise HTTPException(status_code=409, detail=f"clip is {clip.status}, not ready")
+        repo.requeue_recognition(conn, clip_id)
 
     @app.get("/media/{path:path}")
     def media(path: str):

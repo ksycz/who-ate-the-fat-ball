@@ -72,3 +72,35 @@ def test_category_rules(tmp_path):
     assert repo.category_for(conn, "nothing") == "other"
     assert repo.category_for(conn, "Unknown unknown") == "other"
     conn.close()
+
+
+def _v1_library(path):
+    raw = sqlite3.connect(path)
+    schema = resources.files("fatball.library").joinpath("schema.sql").read_text(encoding="utf-8")
+    raw.executescript(f"BEGIN;\n{schema}\nPRAGMA user_version = 1;\nCOMMIT;")
+    raw.execute("INSERT INTO camera(id, name) VALUES (1, 'feeder')")
+    raw.execute(
+        "INSERT INTO clip(camera_id, sd_path, begin_at, end_at, kind) VALUES (1, '/a', 't0', 't1', 'motion')"
+    )
+    raw.commit()
+    raw.close()
+
+
+def test_upgrading_a_v1_library_backs_it_up_first(tmp_path):
+    path = tmp_path / "library.sqlite"
+    _v1_library(path)
+    connect(path).close()
+    backup = tmp_path / "library.sqlite.v1.bak"
+    assert backup.exists()
+    raw = sqlite3.connect(backup)
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert raw.execute("SELECT sd_path FROM clip").fetchall() == [("/a",)]
+    raw.close()
+    connect(path).close()  # already current: the backup is kept as it was, no new one
+    assert sorted(p.name for p in tmp_path.glob("*.bak")) == ["library.sqlite.v1.bak"]
+
+
+def test_a_fresh_library_makes_no_backup(tmp_path):
+    connect(tmp_path / "library.sqlite").close()
+    connect(tmp_path / "library.sqlite").close()
+    assert list(tmp_path.glob("*.bak")) == []

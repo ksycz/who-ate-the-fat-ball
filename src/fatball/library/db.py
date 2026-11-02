@@ -20,8 +20,14 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    _migrate(conn)
+    _migrate(conn, Path(path))
     return conn
+
+
+def begin_immediate(conn: sqlite3.Connection) -> None:
+    """Take the write lock now, inside a `with conn:` block, so what the transaction reads cannot change
+    under it (another connection's write either finished before, or waits until this one commits)."""
+    conn.execute("BEGIN IMMEDIATE")
 
 
 def _read(name: str) -> str:
@@ -38,12 +44,28 @@ def _migrations() -> list[tuple[int, str]]:
     return sorted(found)
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """A fresh database is created at v1 from schema.sql, then every later migration is applied in order."""
+def _migrate(conn: sqlite3.Connection, path: Path) -> None:
+    """A fresh database is created at v1 from schema.sql, then every later migration is applied in order.
+
+    An existing library is copied to `<name>.v<N>.bak` before it is migrated past version N: migrations
+    can't be reversed, and the library is the owner's only record of their clips."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < 1:
         conn.executescript(f"BEGIN;\n{_read('schema.sql')}\nPRAGMA user_version = 1;\nCOMMIT;")
         version = 1
+    elif any(number > version for number, _ in _migrations()):
+        _backup(conn, path.with_name(f"{path.name}.v{version}.bak"))
     for number, script in _migrations():
         if number > version:
             conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;")
+
+
+def _backup(conn: sqlite3.Connection, dest: Path) -> None:
+    """A consistent copy through SQLite's backup API (safe in WAL mode); an existing backup is kept."""
+    if dest.exists():
+        return
+    target = sqlite3.connect(dest)
+    try:
+        conn.backup(target)
+    finally:
+        target.close()

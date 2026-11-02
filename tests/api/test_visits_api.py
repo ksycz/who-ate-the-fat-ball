@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from fatball.library import repo
+from fatball.library import corrections, repo
 from fatball.library.visits import assign_visit
 from fatball.recognition.matcher import Verdict
 from fatball.recognition.recognizer import verdict_to_json
@@ -19,6 +19,14 @@ def catalog(conn):
 
 def sure(species=GREAT, conf=0.9, category="birds", guesses=None):
     return Verdict(category, species, conf, guesses or [(species, conf)], "species", None)
+
+
+def unknown(conf=0.4):
+    return Verdict("birds", None, conf, [], "unknown", None)
+
+
+def first_seen(conn, species):
+    return conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (species,)).fetchone()[0]
 
 
 def add_visit(conn, cam, offset_s, verdict, *, detections=1, **clip_paths):
@@ -196,3 +204,57 @@ def test_retry_requeues_recognition(local, conn, cam):
     assert tuple(row) == (None, None)
     assert [c.id for c in repo.clips_needing_recognition(conn, 10)] == [clip]
     assert local.post("/api/retry/999").status_code == 404
+
+
+def test_retry_refuses_a_clip_that_is_not_ready(local, conn, cam):
+    clip = repo.add_clip(conn, cam, "/broken.h265", T0, T0 + timedelta(seconds=10), "video", 1)
+    repo.set_clip_status(conn, clip, "failed", raw_path="raw/broken.raw")  # the conversion failed
+    assert local.post(f"/api/retry/{clip}").status_code == 409
+
+
+def test_patch_rejects_a_species_that_contradicts_the_category(local, conn, cam):
+    _, v = add_visit(conn, cam, 0, sure())
+    assert local.patch(f"/api/visits/{v}", json={"species": DOG, "category": "birds"}).status_code == 422
+    assert local.patch(f"/api/visits/{v}", json={"species": FOX, "category": "birds"}).status_code == 422
+    assert conn.execute("SELECT COUNT(*) FROM correction").fetchone()[0] == 0
+    assert local.patch(f"/api/visits/{v}", json={"species": BLUE, "category": "birds"}).status_code == 200
+
+
+def test_correction_lowers_first_seen_and_undo_restores_it(local, conn, cam):
+    _, v = add_visit(conn, cam, 0, unknown())
+    add_visit(conn, cam, 5000, sure(GREAT))
+    later = (T0 + timedelta(seconds=5000)).astimezone().isoformat()
+    assert first_seen(conn, GREAT) == later
+    token = local.patch(f"/api/visits/{v}", json={"species": GREAT}).json()["undo_token"]
+    assert first_seen(conn, GREAT) == T0.astimezone().isoformat()  # the owner named an earlier sighting
+    assert local.post(f"/api/undo/{token}").status_code == 204
+    assert first_seen(conn, GREAT) == later
+    token = local.patch(f"/api/visits/{v}", json={"species": BLUE}).json()["undo_token"]
+    assert first_seen(conn, BLUE) == T0.astimezone().isoformat()
+    local.post(f"/api/undo/{token}")
+    assert first_seen(conn, BLUE) is None
+
+
+def test_undo_recomputes_the_visit_from_its_clips(local, conn, cam):
+    _, v = add_visit(conn, cam, 0, sure(GREAT, 0.7))
+    token = local.patch(f"/api/visits/{v}", json={"species": BLUE}).json()["undo_token"]
+    clip2, joined = add_visit(conn, cam, 20, sure(BLUE, 0.95))  # joins only because the owner said blue tit
+    assert joined == v
+    assert local.post(f"/api/undo/{token}").status_code == 204
+    body = local.get(f"/api/visits/{v}").json()
+    assert body["species"]["scientific"] == BLUE  # the visit agrees with its clips again: the best is a blue tit
+    assert conn.execute("SELECT best_clip_id, moved_by_user FROM visit WHERE id = ?", (v,)).fetchone()[:] == (clip2, 0)
+
+
+def test_correction_and_undo_take_the_write_lock_before_reading(conn, cam):
+    _, v = add_visit(conn, cam, 0, sure())
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        token = corrections.apply(conn, v, corrections.Change(is_favourite=True))
+        first_apply = statements[0]
+        statements.clear()
+        corrections.undo(conn, token)
+    finally:
+        conn.set_trace_callback(None)
+    assert (first_apply, statements[0]) == ("BEGIN IMMEDIATE", "BEGIN IMMEDIATE")

@@ -75,6 +75,18 @@ def test_status_viewable_from_lan_and_reports_queue(lan, conn, cam):
     assert _status(lan)["queue"] == {"downloaded": 1, "processing": 1, "failed": 1}
 
 
+def test_status_reports_how_many_examples_recognition_has(local, conn, cam):
+    assert _status(local)["recognition"]["examples"] == 0
+    cid = repo.add_clip(conn, cam, "/e", datetime(2026, 10, 31, 8), datetime(2026, 10, 31, 8), "video", 1)
+    conn.executemany(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label) "
+        "VALUES (?, 0, 'animal', 0.9, 0, 0, 1, 1, ?, ?)",
+        [(cid, b"\x00" * 8, "Parus major"), (cid, b"\x00" * 8, None), (cid, None, "Parus major")],
+    )
+    conn.commit()
+    assert _status(local)["recognition"]["examples"] == 1  # labelled and with a feature
+
+
 def test_status_reports_low_disk(local, monkeypatch, settings):
     usage = shutil._ntuple_diskusage
     monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(100, 90, settings.min_free_bytes - 1))
@@ -263,7 +275,7 @@ def test_status_reports_recognition_counts(settings, conn, cam, clock, local):
     clip(2)
     clip(3, recognized_at="2026-10-31T10:00:00+00:00")
     clip(4, recognition_error="boom")
-    assert _status(local)["recognition"] == {"pending": 2, "errors": 1, "model": False}
+    assert _status(local)["recognition"] == {"pending": 2, "errors": 1, "model": False, "examples": 0}
     loaded = TestClient(create_app(settings, now=clock, model_loaded=lambda: True), client=LOCAL,
                         base_url="http://localhost")
     assert _status(loaded)["recognition"]["model"] is True

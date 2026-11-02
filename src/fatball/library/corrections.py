@@ -1,8 +1,10 @@
 """The owner's corrections to a visit, and undoing them.
 
 A correction changes the visit's category/species and labels the visit's confident animal detections
-(label_source 'correction'), which teaches the matcher. Undo restores the visit fields and each labelled
-detection's previous label, label time and label source exactly. Both run in one transaction.
+(label_source 'correction'), which teaches the matcher, and can make the species' first sighting earlier.
+Undo restores the visit fields, each labelled detection's previous label, label time and label source, and
+the first sighting exactly, then recomputes the visit. Each runs in one write transaction, taken before
+the first read.
 """
 
 import json
@@ -11,6 +13,8 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from fatball.library import visits
+from fatball.library.db import begin_immediate
 from fatball.library.repo import _iso, category_for
 from fatball.recognition.matcher import DET_MIN
 
@@ -44,31 +48,34 @@ class Change:
 def apply(conn: sqlite3.Connection, visit_id: int, change: Change, now: datetime | None = None) -> str:
     """Apply the change and return an undo token. Raises VisitNotFound or InvalidChange."""
     now = now or datetime.now().astimezone()
-    visit = conn.execute("SELECT * FROM visit WHERE id = ?", (visit_id,)).fetchone()
-    if visit is None:
-        raise VisitNotFound(visit_id)
     if change.category is not None and change.category not in CATEGORIES:
         raise InvalidChange(f"unknown category {change.category!r}")
-    species_given = change.species is not UNSET
-    if species_given and change.species is not None:
-        species_id = _species_id(conn, change.species)
-        if species_id is None:
-            raise InvalidChange(f"unknown species {change.species!r}")
-        scientific = change.species
-    elif species_given:
-        species_id, scientific = None, None
-    else:
-        species_id, scientific = visit["species_id"], _scientific(conn, visit["species_id"])
-    corrected = species_given or change.category is not None
-    category = change.category or (category_for(conn, scientific) if species_given else visit["category"])
-    if not species_given and category != category_for(conn, scientific):
-        species_id, scientific = None, None  # a category that contradicts the species drops the species
-    before = {
-        "category": visit["category"], "species_id": visit["species_id"], "subject": visit["subject"],
-        "moved_by_user": visit["moved_by_user"], "is_favourite": visit["is_favourite"],
-        "labelled": [], "correction_id": None,
-    }
     with conn:
+        begin_immediate(conn)
+        visit = conn.execute("SELECT * FROM visit WHERE id = ?", (visit_id,)).fetchone()
+        if visit is None:
+            raise VisitNotFound(visit_id)
+        species_given = change.species is not UNSET
+        if species_given and change.species is not None:
+            species_id = _species_id(conn, change.species)
+            if species_id is None:
+                raise InvalidChange(f"unknown species {change.species!r}")
+            scientific = change.species
+            if change.category is not None and change.category != category_for(conn, scientific):
+                raise InvalidChange(f"{scientific!r} does not belong in {change.category!r}")
+        elif species_given:
+            species_id, scientific = None, None
+        else:
+            species_id, scientific = visit["species_id"], _scientific(conn, visit["species_id"])
+        corrected = species_given or change.category is not None
+        category = change.category or (category_for(conn, scientific) if species_given else visit["category"])
+        if not species_given and category != category_for(conn, scientific):
+            species_id, scientific = None, None  # a category that contradicts the species drops the species
+        before = {
+            "category": visit["category"], "species_id": visit["species_id"], "subject": visit["subject"],
+            "moved_by_user": visit["moved_by_user"], "is_favourite": visit["is_favourite"],
+            "labelled": [], "correction_id": None, "first_seen": None,
+        }
         updates = {}
         if change.is_favourite is not None:
             updates["is_favourite"] = int(change.is_favourite)
@@ -78,6 +85,8 @@ def apply(conn: sqlite3.Connection, visit_id: int, change: Change, now: datetime
             label = scientific or (NOTHING if category == "other" else None)
             if label is not None:
                 before["labelled"] = _label(conn, visit_id, label, now)
+            if scientific:
+                before["first_seen"] = _see_first(conn, scientific, visit["started_at"])
             cur = conn.execute(
                 "INSERT INTO correction(visit_id, from_species_id, to_species_id, from_category, to_category, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -97,32 +106,54 @@ def apply(conn: sqlite3.Connection, visit_id: int, change: Change, now: datetime
 
 
 def undo(conn: sqlite3.Connection, token: str, now: datetime | None = None) -> None:
-    """Restore what `apply` changed. Raises UnknownToken when the token is unknown, expired or its visit is gone."""
+    """Restore what `apply` changed, then recompute the visit from its clips. Raises UnknownToken when the
+    token is unknown, expired or its visit is gone."""
     now = now or datetime.now().astimezone()
-    row = conn.execute("SELECT * FROM undo WHERE token = ?", (token,)).fetchone()
-    if row is None:
-        raise UnknownToken(token)
-    if now - datetime.fromisoformat(row["created_at"]) > UNDO_TTL:
-        with conn:
-            conn.execute("DELETE FROM undo WHERE token = ?", (token,))
-        raise UnknownToken(token)
-    before = json.loads(row["before_json"])
+    expired = False
     with conn:
-        if conn.execute("SELECT 1 FROM visit WHERE id = ?", (row["visit_id"],)).fetchone() is None:
+        begin_immediate(conn)
+        row = conn.execute("SELECT * FROM undo WHERE token = ?", (token,)).fetchone()
+        if row is None:
             raise UnknownToken(token)
+        if now - datetime.fromisoformat(row["created_at"]) > UNDO_TTL:
+            conn.execute("DELETE FROM undo WHERE token = ?", (token,))
+            expired = True
+        else:
+            _restore(conn, row["visit_id"], json.loads(row["before_json"]), token)
+    if expired:
+        raise UnknownToken(token)
+
+
+def _restore(conn: sqlite3.Connection, visit_id: int, before: dict, token: str) -> None:
+    if conn.execute("SELECT 1 FROM visit WHERE id = ?", (visit_id,)).fetchone() is None:
+        raise UnknownToken(token)
+    conn.execute(
+        "UPDATE visit SET category = ?, species_id = ?, subject = ?, moved_by_user = ?, is_favourite = ? "
+        "WHERE id = ?",
+        (before["category"], before["species_id"], before["subject"], before["moved_by_user"],
+         before["is_favourite"], visit_id),
+    )
+    conn.executemany(
+        "UPDATE detection SET label = ?, labelled_at = ?, label_source = ? WHERE id = ?",
+        [(d["label"], d["labelled_at"], d["label_source"], d["id"]) for d in before["labelled"]],
+    )
+    seen = before.get("first_seen")
+    if seen is not None:  # put back the value the correction replaced, unless a clip has lowered it since
         conn.execute(
-            "UPDATE visit SET category = ?, species_id = ?, subject = ?, moved_by_user = ?, is_favourite = ? "
-            "WHERE id = ?",
-            (before["category"], before["species_id"], before["subject"], before["moved_by_user"],
-             before["is_favourite"], row["visit_id"]),
+            "UPDATE species SET first_seen_at = ? WHERE scientific_name = ? AND first_seen_at IS ?",
+            (seen["previous"], seen["species"], seen["set"]),
         )
-        conn.executemany(
-            "UPDATE detection SET label = ?, labelled_at = ?, label_source = ? WHERE id = ?",
-            [(d["label"], d["labelled_at"], d["label_source"], d["id"]) for d in before["labelled"]],
-        )
-        if before["correction_id"] is not None:
-            conn.execute("DELETE FROM correction WHERE id = ?", (before["correction_id"],))
-        conn.execute("DELETE FROM undo WHERE token = ?", (token,))
+    if before["correction_id"] is not None:
+        conn.execute("DELETE FROM correction WHERE id = ?", (before["correction_id"],))
+    conn.execute("DELETE FROM undo WHERE token = ?", (token,))
+    visits.recompute(conn, visit_id)
+
+
+def _see_first(conn: sqlite3.Connection, scientific: str, started_at: str) -> dict:
+    """The owner named this species for the visit: it was seen at the visit's start. Returns what undo needs."""
+    previous = visits.note_first_seen(conn, scientific, datetime.fromisoformat(started_at))
+    now_set = conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (scientific,)).fetchone()[0]
+    return {"species": scientific, "previous": previous, "set": now_set}
 
 
 def _label(conn: sqlite3.Connection, visit_id: int, label: str, now: datetime) -> list[dict]:

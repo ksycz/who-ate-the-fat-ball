@@ -2,7 +2,7 @@
 
 A visit is recomputed from the verdicts stored on its clips (`clip.verdict_json`), so it always agrees
 with them; the verdict passed to `assign_visit` stands in for the current clip's. Everything happens in
-one transaction. Only data rows are ever deleted, never media files.
+one write transaction, taken before the first read. Only data rows are ever deleted, never media files.
 """
 
 import json
@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from fatball.library.db import begin_immediate
 from fatball.library.repo import Clip, _iso
 from fatball.recognition.matcher import Verdict
 
@@ -40,36 +41,63 @@ class _Member:
 
 
 def assign_visit(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -> int:
-    """Put the clip into the right visit (creating, joining or merging) and return that visit's id."""
+    """Put the clip into the right visit (creating, joining or merging) and return that visit's id.
+
+    A clip the owner's visit already holds (moved_by_user) stays there: re-recognising it only recomputes
+    that visit's derived fields, so the pipeline never empties or splits an owner-moved visit."""
     with conn:
-        _remove_from_current_visit(conn, clip.id)
-        compatible = _compatible_visits(conn, clip, verdict)
-        if not compatible:
-            visit_id = _create_visit(conn, verdict)
+        begin_immediate(conn)
+        current = conn.execute(
+            "SELECT v.id, v.moved_by_user FROM visit_clip vc JOIN visit v ON v.id = vc.visit_id WHERE vc.clip_id = ?",
+            (clip.id,),
+        ).fetchone()
+        if current is not None and current["moved_by_user"]:
+            visit_id = current["id"]
         else:
-            visit_id = compatible[0]["id"]
-            if not compatible[0]["moved_by_user"]:
-                species = compatible[0]["species_id"]  # the target's effective species as merges happen
-                for other in compatible[1:]:
-                    if _can_merge(species, other):
-                        _merge_into(conn, visit_id, other["id"])
-                        species = species if species is not None else other["species_id"]
-        conn.execute("INSERT INTO visit_clip(visit_id, clip_id) VALUES (?, ?)", (visit_id, clip.id))
+            if current is not None:
+                _remove_from_visit(conn, clip.id, current["id"])
+            visit_id = _join_or_create(conn, clip, verdict)
+            conn.execute("INSERT INTO visit_clip(visit_id, clip_id) VALUES (?, ?)", (visit_id, clip.id))
         _recompute(conn, visit_id, clip, verdict)
-        if verdict.subject == "species":
-            conn.execute(
-                "UPDATE species SET first_seen_at = ? WHERE scientific_name = ? AND first_seen_at IS NULL",
-                (_iso(clip.begin_at), verdict.species),
-            )
+        if verdict.subject == "species" and verdict.species:
+            note_first_seen(conn, verdict.species, clip.begin_at)
     return visit_id
 
 
-def _remove_from_current_visit(conn: sqlite3.Connection, clip_id: int) -> None:
-    """A re-recognised clip leaves its old visit first; an emptied visit is deleted, others recomputed."""
-    old = conn.execute("SELECT visit_id FROM visit_clip WHERE clip_id = ?", (clip_id,)).fetchone()
-    if old is None:
-        return
-    visit_id = old["visit_id"]
+def recompute(conn: sqlite3.Connection, visit_id: int) -> None:
+    """Rebuild a visit's derived fields from its clips' stored verdicts (the caller holds the transaction)."""
+    _recompute(conn, visit_id, None, None)
+
+
+def note_first_seen(conn: sqlite3.Connection, scientific: str, when: datetime) -> str | None:
+    """Lower the species' first_seen_at to `when` when that is earlier, or when it has none yet: it is the
+    earliest sighting, whatever order clips are recognised in. Returns the previous stored value."""
+    row = conn.execute("SELECT first_seen_at FROM species WHERE scientific_name = ?", (scientific,)).fetchone()
+    if row is None:
+        return None
+    previous = row["first_seen_at"]
+    if previous is None or when.astimezone() < datetime.fromisoformat(previous):
+        conn.execute("UPDATE species SET first_seen_at = ? WHERE scientific_name = ?", (_iso(when), scientific))
+    return previous
+
+
+def _join_or_create(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -> int:
+    compatible = _compatible_visits(conn, clip, verdict)
+    if not compatible:
+        return _create_visit(conn, verdict)
+    visit_id = compatible[0]["id"]
+    if not compatible[0]["moved_by_user"]:
+        species = compatible[0]["species_id"]  # the target's effective species as merges happen
+        for other in compatible[1:]:
+            if _can_merge(species, other):
+                _merge_into(conn, visit_id, other["id"])
+                species = species if species is not None else other["species_id"]
+    return visit_id
+
+
+def _remove_from_visit(conn: sqlite3.Connection, clip_id: int, visit_id: int) -> None:
+    """A re-recognised clip leaves its old (not owner-moved) visit first; an emptied visit is deleted,
+    others recomputed."""
     conn.execute("DELETE FROM visit_clip WHERE clip_id = ?", (clip_id,))
     if conn.execute("SELECT 1 FROM visit_clip WHERE visit_id = ?", (visit_id,)).fetchone() is None:
         _delete_visit(conn, visit_id)
@@ -141,7 +169,13 @@ def _can_merge(target_species: int | None, other: sqlite3.Row) -> bool:
 
 
 def _merge_into(conn: sqlite3.Connection, target_id: int, other_id: int) -> None:
+    """Move the other visit's clips into the target; a favourite on either side is kept."""
     conn.execute("UPDATE visit_clip SET visit_id = ? WHERE visit_id = ?", (target_id, other_id))
+    conn.execute(
+        "UPDATE visit SET is_favourite = MAX(is_favourite, (SELECT is_favourite FROM visit WHERE id = ?)) "
+        "WHERE id = ?",
+        (other_id, target_id),
+    )
     _delete_visit(conn, other_id)
 
 
