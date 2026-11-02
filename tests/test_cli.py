@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -20,6 +21,8 @@ from fatball.library.db import connect
 from fatball.media.convert import FFMPEG
 from fatball.recognition.detector import Detection
 from fatball.recognition.fake import FakeDetector
+
+GREAT_TIT = "Parus major"
 
 
 def test_cli_help_lists_all_commands(capsys):
@@ -114,6 +117,41 @@ def test_setup_stores_ip_password_and_pin_hash(setup_cli, capsys):
     assert "hunter2" not in out and "1234" not in out
 
 
+def test_setup_fills_the_species_catalog(setup_cli):
+    _, _, conn = setup_cli(typed=[""], secret=["", ""], stored="old")
+    assert conn.execute("SELECT COUNT(*) FROM species").fetchone()[0] == 48
+
+
+def test_serve_fills_the_species_catalog_so_a_first_correction_works(tmp_path, monkeypatch):
+    import uvicorn
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*starlette.testclient.*")  # as in tests/api/conftest.py
+        from fastapi.testclient import TestClient
+
+    from fatball.api.app import create_app
+    from fatball.library.visits import assign_visit
+    from fatball.recognition.matcher import Verdict
+
+    def stop_at_once(server):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(uvicorn.Server, "run", stop_at_once)
+    settings = Settings(data_dir=tmp_path / "data")  # a fresh install: nothing pre-fills the catalog
+    cli.serve(settings, host="127.0.0.1", port=_free_port(), detector_loader=lambda: None)
+    conn = connect(settings.db_path)
+    try:
+        cam = repo.upsert_camera(conn, "feeder", None, None)
+        begin = datetime(2026, 10, 30, 8)
+        clip = repo.add_clip(conn, cam, "/a.h265", begin, begin + timedelta(seconds=10), "video", 1)
+        visit = assign_visit(conn, repo.get_clip(conn, clip), Verdict("birds", None, 0.4, [], "unknown", None))
+        client = TestClient(create_app(settings), client=("127.0.0.1", 5000), base_url="http://localhost")
+        assert client.patch(f"/api/visits/{visit}", json={"species": GREAT_TIT}).status_code == 200
+        assert repo.category_for(conn, GREAT_TIT) == "birds"
+    finally:
+        conn.close()
+
+
 def test_setup_blank_keeps_everything(setup_cli):
     code, saved, conn = setup_cli(typed=[""], secret=["", ""], stored="old")
     assert code == 0
@@ -203,11 +241,11 @@ def test_set_camera_password_needs_a_known_camera_ip(set_pw_cli):
 
 
 # examples-import
-GREAT_TIT = "Parus major"
 
 
 @pytest.fixture
-def library(tmp_path):
+def library(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.qos, "set_background_priority", lambda: True)  # never lower the test runner itself
     settings = Settings(data_dir=tmp_path / "data")
     settings.data_dir.mkdir()
     conn = connect(settings.db_path)
@@ -300,15 +338,20 @@ def test_import_needing_recognition_without_a_model_writes_nothing(library, tmp_
     assert all(r[1] is None for r in _stored(conn))
 
 
-def test_import_recognises_an_unrecognised_clip_first(library, tmp_path, capsys):
-    settings, conn, (a, _, _) = library
-    conn.execute("DELETE FROM detection WHERE clip_id = ?", (a,))
-    conn.execute("UPDATE clip SET recognized_at = NULL WHERE id = ?", (a,))
-    web = settings.media_dir / "clips" / str(a) / "web.mp4"
+def _unrecognise_with_video(settings, conn, clip_id):
+    """Make the clip a converted video that has not been recognised yet (a real 2 s test pattern)."""
+    conn.execute("DELETE FROM detection WHERE clip_id = ?", (clip_id,))
+    conn.execute("UPDATE clip SET recognized_at = NULL WHERE id = ?", (clip_id,))
+    web = settings.media_dir / "clips" / str(clip_id) / "web.mp4"
     web.parent.mkdir(parents=True)
     subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10",
                     "-t", "2", "-pix_fmt", "yuv420p", str(web)], check=True)
-    repo.set_clip_status(conn, a, "ready", web_path=web.relative_to(settings.media_dir).as_posix())
+    repo.set_clip_status(conn, clip_id, "ready", web_path=web.relative_to(settings.media_dir).as_posix())
+
+
+def test_import_recognises_an_unrecognised_clip_first(library, tmp_path, capsys):
+    settings, conn, (a, _, _) = library
+    _unrecognise_with_video(settings, conn, a)
     detector = FakeDetector({1: [Detection("animal", 0.9, (0.2, 0.2, 0.6, 0.6))]})
     features = lambda path, box: np.array([1.0, 0.0], dtype=np.float32)
     code = cli.run_examples_import(settings, _csv(tmp_path, (a, "Parus major")),
@@ -316,3 +359,30 @@ def test_import_recognises_an_unrecognised_clip_first(library, tmp_path, capsys)
     assert code == 0
     assert capsys.readouterr().out.strip() == "1 examples from 1 clips"
     assert repo.is_recognized(conn, a)
+    assert repo.visit_for_clip(conn, a) is not None  # in a visit, like any clip the processor recognises
+
+
+class BrokenDetector:
+    def detect(self, image_path):
+        raise RuntimeError("model blew up")
+
+
+def test_import_recognition_failure_is_reported_and_labels_nothing(library, tmp_path, capsys):
+    settings, conn, (a, b, _) = library
+    _unrecognise_with_video(settings, conn, b)
+    path = _csv(tmp_path, (a, "Parus major"), (b, "Parus major"))  # a is already recognised, b is not
+    code = cli.run_examples_import(settings, path, detector_loader=lambda: BrokenDetector(),
+                                   features=lambda path, box: np.array([1.0, 0.0], dtype=np.float32))
+    assert code == 1
+    out = capsys.readouterr().out
+    assert f"clip {b}" in out and "model blew up" in out
+    assert all(r[1] is None for r in _stored(conn))  # nothing labelled, not even the recognised clip a
+    assert conn.execute("SELECT recognition_error FROM clip WHERE id = ?", (b,)).fetchone()[0] is not None
+
+
+def test_import_runs_at_background_priority(library, tmp_path, monkeypatch, capsys):
+    settings, _, (a, _, _) = library
+    calls = []
+    monkeypatch.setattr(cli.qos, "set_background_priority", lambda: calls.append(1) or True)
+    assert cli.run_examples_import(settings, _csv(tmp_path, (a, "Parus major")), detector_loader=_no_model) == 0
+    assert calls == [1]

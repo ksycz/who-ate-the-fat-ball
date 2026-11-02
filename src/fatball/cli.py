@@ -6,6 +6,7 @@ import getpass
 import ipaddress
 import logging
 import signal
+import sqlite3
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
@@ -17,7 +18,7 @@ from fatball.api import auth as auth_mod
 from fatball.camera import discovery
 from fatball.camera.client import CameraError, CameraUnreachable, WrongPassword, XMClient
 from fatball.config import Settings
-from fatball.ingest.processor import Processor
+from fatball.ingest.processor import Processor, recognize_and_group
 from fatball.ingest.watcher import CAMERA_NAME, CAMERA_USER, Watcher
 from fatball.library import db, repo
 from fatball.recognition import qos
@@ -108,6 +109,15 @@ def _restore_sigterm(previous) -> None:
         signal.signal(signal.SIGTERM, previous)
 
 
+def open_library(settings: Settings) -> sqlite3.Connection:
+    """Open the library (creating or migrating it as needed) with the species catalog filled in, so the
+    species are known from the first run: corrections and category rules work before any import."""
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = db.connect(settings.db_path)
+    repo.ensure_catalog(conn)
+    return conn
+
+
 def model_loader(settings: Settings) -> Callable[[], object | None]:
     """A loader for the real detector: None while the model file is missing, the Detector once it exists."""
     path = settings.data_dir / "models" / MODEL_FILENAME
@@ -130,7 +140,7 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
 
     from fatball.api.app import create_app
 
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    open_library(settings).close()  # once at startup, not per API request
     # One connection per thread: sqlite3 connections are not safe for concurrent use (the API opens its own).
     watcher_conn, processor_conn = (db.connect(settings.db_path) for _ in range(2))
     stop = threading.Event()
@@ -206,8 +216,7 @@ def run_setup(
     set_password: Callable[[str], None] = secrets.set_password,
 ) -> int:
     """Interactive setup on the Mac itself: writes the database and the Keychain directly. Never echoes secrets."""
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    conn = db.connect(settings.db_path)
+    conn = open_library(settings)
     try:
         while True:
             ip = input_fn("Camera IP address (blank = keep / find it automatically): ").strip()
@@ -269,8 +278,7 @@ def run_set_camera_password(
     The new password is saved only once the camera has logged in with it, so the app and the camera can't
     end up disagreeing.
     """
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    conn = db.connect(settings.db_path)
+    conn = open_library(settings)
     try:
         camera = repo.get_camera(conn)
     finally:
@@ -345,18 +353,18 @@ def run_examples_import(
 ) -> int:
     """Label each listed clip's confident animal detections from a `clip_id,label` CSV.
 
-    Every row is checked first; on any problem nothing is written. Clips not yet recognised are recognised
-    first, which needs the detector."""
+    Every row is checked first; on any problem nothing is written. Clips not yet recognised are then all
+    recognised and put in visits, exactly as the processor does (which needs the detector), before anything
+    is labelled: if any of them fails, it is reported and nothing is labelled. Runs at background priority."""
+    qos.set_background_priority()
     with open(csv_path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         if not {"clip_id", "label"} <= set(reader.fieldnames or ()):
             print("The CSV needs the columns clip_id,label.")
             return 1
         rows = [(r["clip_id"].strip(), r["label"].strip()) for r in reader]
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    conn = db.connect(settings.db_path)
+    conn = open_library(settings)
     try:
-        repo.ensure_catalog(conn)
         wanted: dict[int, str | None] = {}  # clip id -> label to give (None: adds no examples); last row wins
         errors: list[str] = []
         for n, (raw_id, name) in enumerate(rows, start=2):
@@ -386,7 +394,6 @@ def run_examples_import(
             for e in errors:
                 print("  " + e)
             return 1
-        recognizer = None
         if todo:
             try:
                 detector = detector_loader()
@@ -399,12 +406,21 @@ def run_examples_import(
                 print("  " + ", ".join(str(i) for i in todo))
                 return 1
             recognizer = Recognizer(settings, conn, detector, features)
+            failed = []
+            for clip_id in todo:
+                error = recognize_and_group(conn, recognizer, repo.get_clip(conn, clip_id))
+                if error is not None:
+                    failed.append(f"clip {clip_id}: {error}")
+            if failed:
+                print("These clips could not be recognised, so nothing was labelled. Run the import again, "
+                      "or leave them out of the CSV:")
+                for line in failed:
+                    print("  " + line)
+                return 1
         examples = clips = 0
         for clip_id, label in wanted.items():
             if label is None:
                 continue
-            if clip_id in todo:
-                recognizer.recognize(repo.get_clip(conn, clip_id))
             n = repo.label_detections(conn, clip_id, label, "import")
             examples += n
             clips += n > 0
