@@ -1,5 +1,7 @@
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 
+import numpy as np
 import pytest
 
 from fatball.config import Settings
@@ -7,6 +9,10 @@ from fatball.ingest import processor as processor_mod
 from fatball.ingest.processor import Processor
 from fatball.library import repo
 from fatball.library.db import connect
+from fatball.recognition.detector import Detection, ModelMissing
+from fatball.recognition.fake import FakeDetector
+from fatball.recognition.matcher import Verdict
+from fatball.recognition.recognizer import Recognizer
 
 BEGIN = datetime(2026, 10, 31, 9, 0, 0)
 
@@ -139,3 +145,146 @@ def test_processor_uses_raw_path_read_at_claim_time(settings, conn, monkeypatch)
     assert Processor(settings, conn).process_pending() == 1
     assert seen == [b"x"]
     assert _get(conn, clip_id).status == "ready"
+
+
+GREAT_TIT = "Parus major"
+BIRD = np.array([1.0, 0.0], dtype=np.float32)
+
+
+def _teach_great_tit(conn):
+    """A labelled great tit example on another clip, so a detected bird is recognised as one."""
+    repo.ensure_catalog(conn)
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    holder = repo.add_clip(conn, cam, "/examples", BEGIN - timedelta(days=9), BEGIN, "h264", 1)
+    conn.execute(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label) "
+        "VALUES (?, 0, 'animal', 0.9, 0, 0, 1, 1, ?, ?)",
+        (holder, BIRD.tobytes(), GREAT_TIT),
+    )
+    conn.commit()
+
+
+def _bird_detector():
+    return FakeDetector(lambda i: [Detection("animal", 0.9, (0.2, 0.2, 0.6, 0.6))])
+
+
+def _real_recognizer(settings, conn):
+    return Recognizer(settings, conn, _bird_detector(), lambda path, box: BIRD)
+
+
+class StubRecognizer:
+    """Records the clips it is asked about; raises for the ids in `fail`."""
+
+    def __init__(self, conn, fail=()):
+        self.conn, self.fail, self.seen = conn, set(fail), []
+
+    def recognize(self, clip):
+        self.seen.append(clip.id)
+        if clip.id in self.fail:
+            raise RuntimeError("model blew up")
+        repo.set_recognition(self.conn, clip.id, best_frame_path=None, verdict_json="{}",
+                             recognized_at=datetime.now())
+        return Verdict("birds", GREAT_TIT, 1.0, [(GREAT_TIT, 1.0)], "species", None)
+
+
+def _ready_clip(conn, hour: int):
+    repo.ensure_catalog(conn)
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    begin = BEGIN.replace(hour=hour)
+    clip_id = repo.add_clip(conn, cam, f"/idea0/{hour}", begin, begin + timedelta(seconds=2), "h264", 1)
+    repo.set_clip_status(conn, clip_id, "ready", web_path=f"clips/{clip_id}/web.mp4")
+    return clip_id
+
+
+def _recognition(conn, clip_id):
+    row = conn.execute("SELECT recognized_at, recognition_error FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return row["recognized_at"], row["recognition_error"]
+
+
+def test_downloaded_clip_is_recognised_and_in_a_visit(settings, conn, xm_clip_bytes):
+    _teach_great_tit(conn)
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    assert Processor(settings, conn, _real_recognizer(settings, conn)).process_pending() == 1
+    assert _get(conn, clip_id).status == "ready"
+    assert _recognition(conn, clip_id)[0] is not None
+    visit_id = repo.visit_for_clip(conn, clip_id)
+    assert visit_id is not None
+    species = conn.execute(
+        "SELECT s.scientific_name FROM visit v JOIN species s ON s.id = v.species_id WHERE v.id = ?", (visit_id,)
+    ).fetchone()
+    assert species[0] == GREAT_TIT
+
+
+def test_backfill_does_one_clip_per_pass_oldest_first(settings, conn):
+    late, early, mid = _ready_clip(conn, 15), _ready_clip(conn, 8), _ready_clip(conn, 11)
+    stub = StubRecognizer(conn)
+    p = Processor(settings, conn, stub)
+    for expected in ([early], [early, mid], [early, mid, late], [early, mid, late]):
+        p.process_pending()
+        assert stub.seen == expected
+    assert all(repo.visit_for_clip(conn, c) is not None for c in (late, early, mid))
+
+
+def test_recognition_error_keeps_clip_playable(settings, conn, xm_clip_bytes, caplog):
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    stub = StubRecognizer(conn, fail=[clip_id])
+    with caplog.at_level(logging.ERROR):
+        assert Processor(settings, conn, stub).process_pending() == 1
+    clip = _get(conn, clip_id)
+    assert clip.status == "ready" and (settings.media_dir / clip.web_path).exists()
+    recognized_at, error = _recognition(conn, clip_id)
+    assert recognized_at is None and "model blew up" in error
+    assert f"recognising clip {clip_id} failed" in caplog.text
+
+
+def test_failed_clip_is_skipped_by_later_passes(settings, conn):
+    bad, good = _ready_clip(conn, 8), _ready_clip(conn, 9)
+    stub = StubRecognizer(conn, fail=[bad])
+    p = Processor(settings, conn, stub)
+    p.process_pending()
+    p.process_pending()
+    assert stub.seen == [bad, good]
+    assert _recognition(conn, good)[0] is not None
+
+
+def test_missing_model_keeps_clips_ready_and_unrecognised(settings, conn, xm_clip_bytes):
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    assert Processor(settings, conn).process_pending() == 1
+    assert _get(conn, clip_id).status == "ready"
+    assert _recognition(conn, clip_id) == (None, None)
+    assert repo.visit_for_clip(conn, clip_id) is None
+
+
+def test_model_appearing_later_starts_recognition(settings, conn, xm_clip_bytes, caplog):
+    _teach_great_tit(conn)
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    detectors = [None, None, _bird_detector()]
+    p = Processor(settings, conn, detector_loader=lambda: detectors.pop(0), features=lambda path, box: BIRD)
+    with caplog.at_level(logging.WARNING):
+        p.process_pending()
+        p.process_pending()
+    assert not p.has_detector
+    assert _get(conn, clip_id).status == "ready" and _recognition(conn, clip_id)[0] is None
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1  # warned once, not per pass
+    p.process_pending()
+    assert p.has_detector
+    assert _recognition(conn, clip_id)[0] is not None and repo.visit_for_clip(conn, clip_id) is not None
+
+
+def test_loader_failure_is_survived(settings, conn, xm_clip_bytes):
+    def load():
+        raise ModelMissing("run scripts/export_detector.py")
+
+    clip_id, _ = _clip(conn, settings, xm_clip_bytes)
+    p = Processor(settings, conn, detector_loader=load)
+    assert p.process_pending() == 1
+    assert _get(conn, clip_id).status == "ready" and not p.has_detector
+
+
+def test_photos_are_never_recognised(settings, conn, monkeypatch):
+    monkeypatch.setattr(processor_mod, "extract_jpeg", lambda raw: b"\xff\xd8jpeg\xff\xd9")
+    clip_id, _ = _clip(conn, settings, b"raw", kind="jpg")
+    stub = StubRecognizer(conn)
+    Processor(settings, conn, stub).process_pending()
+    assert _get(conn, clip_id).status == "ready" and stub.seen == []
+    assert repo.recognition_counts(conn) == {"pending": 0, "errors": 0}

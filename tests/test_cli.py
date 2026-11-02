@@ -135,8 +135,10 @@ def test_setup_can_store_an_empty_camera_password_when_none_is_kept(setup_cli):
     assert saved == [""]
 
 
-def test_processor_loop_survives_errors_and_stops(tmp_path):
+def test_processor_loop_survives_errors_and_stops(tmp_path, monkeypatch):
     calls = []
+    qos_calls = []
+    monkeypatch.setattr(cli.qos, "set_background_priority", lambda: qos_calls.append(1) or True)
     stop = threading.Event()
 
     class Flaky:
@@ -150,6 +152,7 @@ def test_processor_loop_survives_errors_and_stops(tmp_path):
 
     cli.processor_loop(Flaky(), stop, interval_s=0.01)
     assert len(calls) == 3
+    assert qos_calls == [1]  # once, at thread start
 
 
 @pytest.fixture

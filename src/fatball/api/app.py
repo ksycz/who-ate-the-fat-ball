@@ -55,8 +55,13 @@ def _media_url(path: str | None) -> str | None:
     return f"/media/{path}" if path else None
 
 
-def create_app(settings: Settings, *, now: Callable[[], datetime] = _local_now) -> FastAPI:
-    """Build the API. Each request gets its own database connection (sqlite3 connections must not be
+def create_app(
+    settings: Settings,
+    *,
+    now: Callable[[], datetime] = _local_now,
+    model_loaded: Callable[[], bool] = lambda: False,
+) -> FastAPI:
+    """Build the API. `model_loaded` says whether the processor currently has a detector. Each request gets its own database connection (sqlite3 connections must not be
     shared across FastAPI's thread pool); the database is created up front so requests never race to."""
     db.connect(settings.db_path).close()
     app = FastAPI(title="Who Ate the Fat Ball?")
@@ -84,6 +89,7 @@ def create_app(settings: Settings, *, now: Callable[[], datetime] = _local_now) 
                 "last_error": cam.last_error if cam else None,
             },
             "queue": repo.queue_counts(conn),
+            "recognition": {**repo.recognition_counts(conn), "model": model_loaded()},
             "disk": {"free_bytes": free, "low": free < settings.min_free_bytes},
         }
 

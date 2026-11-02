@@ -302,3 +302,28 @@ def visit_for_clip(conn: sqlite3.Connection, clip_id: int) -> int | None:
     """The id of the visit this clip belongs to, or None."""
     row = conn.execute("SELECT visit_id FROM visit_clip WHERE clip_id = ?", (clip_id,)).fetchone()
     return row["visit_id"] if row else None
+
+
+def clips_needing_recognition(conn: sqlite3.Connection, limit: int) -> list[Clip]:
+    """Ready videos not yet recognised and not failed at it, oldest first. Photos have no video, so never."""
+    rows = conn.execute(
+        "SELECT * FROM clip WHERE status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL "
+        "AND recognition_error IS NULL ORDER BY begin_at, id LIMIT ?",
+        (limit,),
+    )
+    return [_clip(r) for r in rows]
+
+
+def set_recognition_error(conn: sqlite3.Connection, clip_id: int, message: str) -> None:
+    conn.execute("UPDATE clip SET recognition_error = ? WHERE id = ?", (message, clip_id))
+    conn.commit()
+
+
+def recognition_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """pending: ready videos waiting to be recognised; errors: clips whose recognition failed."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL "
+        "AND recognition_error IS NULL), 0) AS pending, "
+        "COALESCE(SUM(recognition_error IS NOT NULL), 0) AS errors FROM clip"
+    ).fetchone()
+    return {"pending": row["pending"], "errors": row["errors"]}

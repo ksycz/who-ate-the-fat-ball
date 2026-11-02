@@ -4,9 +4,10 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from fatball.api.app import create_app
 from fatball.library import repo
 
-from .conftest import NOW
+from .conftest import LOCAL, NOW, TestClient
 
 
 def _status(client):
@@ -247,3 +248,22 @@ def test_clips_kind_is_video_or_photo(local, conn, cam):
         cid = repo.add_clip(conn, cam, f"/k{i}", b, b, kind, 1)
         repo.set_clip_status(conn, cid, "ready")
     assert [c["kind"] for c in local.get("/api/clips").json()] == ["photo", "video"]
+
+
+def test_status_reports_recognition_counts(settings, conn, cam, clock, local):
+    def clip(n, **fields):
+        begin = NOW - timedelta(hours=n)
+        i = repo.add_clip(conn, cam, f"/c{n}", begin, begin, "h264", 1)
+        repo.set_clip_status(conn, i, "ready", web_path=f"clips/{i}/web.mp4")
+        for column, value in fields.items():
+            conn.execute(f"UPDATE clip SET {column} = ? WHERE id = ?", (value, i))
+        conn.commit()
+
+    clip(1)
+    clip(2)
+    clip(3, recognized_at="2026-10-31T10:00:00+00:00")
+    clip(4, recognition_error="boom")
+    assert _status(local)["recognition"] == {"pending": 2, "errors": 1, "model": False}
+    loaded = TestClient(create_app(settings, now=clock, model_loaded=lambda: True), client=LOCAL,
+                        base_url="http://localhost")
+    assert _status(loaded)["recognition"]["model"] is True

@@ -19,6 +19,8 @@ from fatball.config import Settings
 from fatball.ingest.processor import Processor
 from fatball.ingest.watcher import CAMERA_NAME, CAMERA_USER, Watcher
 from fatball.library import db, repo
+from fatball.recognition import qos
+from fatball.recognition.detector import MODEL_FILENAME
 
 log = logging.getLogger("fatball")
 
@@ -59,7 +61,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 # serve and demo share this
 def processor_loop(processor, stop: threading.Event, interval_s: float = PROCESS_INTERVAL_S) -> None:
-    """Convert downloaded clips until `stop` is set; one failing pass never stops the loop."""
+    """Convert and recognise clips until `stop` is set; one failing pass never stops the loop.
+
+    The thread drops to background priority first, so recognition yields to everything else on the Mac."""
+    qos.set_background_priority()
     while not stop.is_set():
         try:
             processor.process_pending()
@@ -94,8 +99,23 @@ def _restore_sigterm(previous) -> None:
         signal.signal(signal.SIGTERM, previous)
 
 
+def model_loader(settings: Settings) -> Callable[[], object | None]:
+    """A loader for the real detector: None while the model file is missing, the Detector once it exists."""
+    path = settings.data_dir / "models" / MODEL_FILENAME
+
+    def load():
+        if not path.exists():  # a cheap stat each pass, so a model dropped in later is picked up
+            return None
+        from fatball.recognition.detector import Detector
+
+        return Detector(path)
+
+    return load
+
+
 def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | None = None,
-          banner: str = "") -> None:
+          banner: str = "", detector_loader: Callable[[], object | None] | None = None,
+          features: Callable | None = None) -> None:
     """Run the watcher and the processor in background threads and the API in this one until Ctrl-C."""
     import uvicorn
 
@@ -106,7 +126,9 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
     watcher_conn, processor_conn = (db.connect(settings.db_path) for _ in range(2))
     stop = threading.Event()
     watcher = Watcher(settings, watcher_conn, sleep=stop.wait, **(watcher_options or {}))
-    processor = Processor(settings, processor_conn)
+    extra = {} if features is None else {"features": features}
+    processor = Processor(settings, processor_conn, detector_loader=detector_loader or model_loader(settings),
+                          **extra)
     threads = [
         threading.Thread(target=watcher.run_forever, name="watcher", daemon=True),
         threading.Thread(target=processor_loop, args=(processor, stop), name="processor", daemon=True),
@@ -121,7 +143,7 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
     print(f"Set up from this Mac at http://localhost:{port} (setup only works locally). Ctrl-C stops.")
 
     # proxy_headers=False: we never sit behind a proxy, so X-Forwarded-For must not make a client "local".
-    config = uvicorn.Config(create_app(settings), host=host, port=port, proxy_headers=False)
+    config = uvicorn.Config(create_app(settings, model_loaded=lambda: processor.has_detector), host=host, port=port, proxy_headers=False)
     # uvicorn shuts down gracefully on SIGTERM, then restores the previous handler and re-raises the
     # signal. With the default handler that kills the process before our clean-up runs, so install one
     # that turns SIGTERM into KeyboardInterrupt, like Ctrl-C (signal handlers run in the main thread).
@@ -157,8 +179,11 @@ def run_demo(*, host: str = "127.0.0.1", port: int, n_clips: int = 12, days: int
         settings = Settings(data_dir=Path(tmp), camera_port=cam.port)
         conn = db.connect(settings.db_path)
         repo.upsert_camera(conn, CAMERA_NAME, None, "127.0.0.1")
+        demo.seed_examples(conn)
         conn.close()
+        detector, features = demo.fake_recognition()
         serve(settings, host=host, port=port, watcher_options=demo.watcher_options(),
+              detector_loader=lambda: detector, features=features,
               banner=DEMO_BANNER.format(n=n_clips, days=days))
 
 
