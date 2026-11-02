@@ -12,8 +12,11 @@ from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import Literal
 
+from fatball.recognition.catalog import CATALOG, DOG
+
 # downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
 Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
+Category = Literal["birds", "other_animals", "other"]
 _STATUSES = ("downloading", "downloaded", "processing", "ready", "failed")
 _PATH_COLUMNS = frozenset(
     {"original_path", "web_path", "poster_path", "preview_path", "raw_path", "duration_s"}
@@ -224,3 +227,30 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value),
     )
     conn.commit()
+
+
+def ensure_catalog(conn: sqlite3.Connection) -> None:
+    """Make sure every catalog species has a row and an English name. Safe to call any number of times."""
+    for english, scientific, group in CATALOG:
+        conn.execute(
+            'INSERT INTO species(scientific_name, "group") VALUES (?, ?) '
+            'ON CONFLICT(scientific_name) DO UPDATE SET "group" = excluded."group"',
+            (scientific, group),
+        )
+        species_id = conn.execute("SELECT id FROM species WHERE scientific_name = ?", (scientific,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO species_name(species_id, lang, name) VALUES (?, 'en', ?) "
+            "ON CONFLICT(species_id, lang) DO UPDATE SET name = excluded.name",
+            (species_id, english),
+        )
+    conn.commit()
+
+
+def category_for(conn: sqlite3.Connection, scientific_name: str | None) -> Category:
+    """birds for a bird, other for a dog, other_animals for any other mammal, other for everything else."""
+    if scientific_name is None or scientific_name == DOG:
+        return "other"
+    row = conn.execute('SELECT "group" FROM species WHERE scientific_name = ?', (scientific_name,)).fetchone()
+    if row is None:
+        return "other"
+    return "birds" if row["group"] == "bird" else "other_animals"

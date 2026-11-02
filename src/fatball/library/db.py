@@ -1,10 +1,11 @@
 """SQLite connection and schema bootstrap. The library is the only code that touches the database."""
 
+import re
 import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 BUSY_TIMEOUT_S = 5.0
 
 
@@ -19,7 +20,30 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
-        script = resources.files("fatball.library").joinpath("schema.sql").read_text(encoding="utf-8")
-        conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {SCHEMA_VERSION};\nCOMMIT;")
+    _migrate(conn)
     return conn
+
+
+def _read(name: str) -> str:
+    return resources.files("fatball.library").joinpath(name).read_text(encoding="utf-8")
+
+
+def _migrations() -> list[tuple[int, str]]:
+    """The packaged migrations/NNN_*.sql files as (version, script), in order."""
+    found = []
+    for entry in resources.files("fatball.library").joinpath("migrations").iterdir():
+        match = re.fullmatch(r"(\d{3})_.+\.sql", entry.name)
+        if match:
+            found.append((int(match.group(1)), entry.read_text(encoding="utf-8")))
+    return sorted(found)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """A fresh database is created at v1 from schema.sql, then every later migration is applied in order."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 1:
+        conn.executescript(f"BEGIN;\n{_read('schema.sql')}\nPRAGMA user_version = 1;\nCOMMIT;")
+        version = 1
+    for number, script in _migrations():
+        if number > version:
+            conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;")
