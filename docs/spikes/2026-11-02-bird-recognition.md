@@ -76,4 +76,27 @@ What it means for the product:
 
 - ~~Detector speed without the PytorchWildlife wrapper.~~ Measured with the Core ML export (Task 1, M-series MacBook Air, run at `nice 19`): about 10 ms per 2560×1440 frame once warm (76 ms for the first call), against 0.14–0.21 s per frame on MPS in this spike. The Python process peaked at about 190 MB resident.
 - Core ML export parity. The first export (Task 1) ran BatchNorm in eval mode, on running statistics, and treated that as the true model. It was wrong. PytorchWildlife never calls `.eval()`, so MegaDetector as published, and this spike, normalise each image by its own statistics (training mode, batch size 1). Eval mode calls a close-up great tit "person": up to 0.81, in 7 to 9 frames of a 21-frame clip. The export now swaps every BatchNorm for instance normalisation with the same weights. The app letterboxes each frame in PIL like PytorchWildlife (LANCZOS, grey 114); Vision's black padding loses weak animals once normalisation is per image. On six check clips this matches the spike again. On two great-tit clips, person stays at or under 0.18 in every frame and animal reaches 0.87 to 0.88. The person clip still gives person 0.90, the dog clip gives animal 0.63, and the empty infrared clip peaks at 0.29. So the spike thresholds hold. Cost: about 10 ms of inference plus 11 ms of letterboxing per 1280-px frame.
-- End-to-end time per clip, against the spec's 30-second target.
+- ~~End-to-end time per clip, against the spec's 30-second target.~~ Measured in Plan 2 (below).
+
+## Plan 2 results (2026-11-02, the owner's MacBook Air, 8 GB)
+
+Measured through the app's own code, after the detector fix described above.
+
+| Check | Result |
+|---|---|
+| Example import (63 labelled clips) | 661 examples from 42 clips. Peak 261 MB. |
+| Leave-one-clip-out, right section | **59 of 63** (spike D: 55) |
+| Leave-one-clip-out, right species on clear birds | **13 of 17** (spike D: 13) |
+| Sure-share cut-off 0.55–0.75 | Identical results, so `SURE_SHARE` stays at 0.65 |
+| Recognising one clip (warm) | 0.9–1.7 s. Peak 194–213 MB. Free memory stayed at 35% or more. |
+| 50 oldest clips (`recognize-old --limit 50`) | 49 recognised. One failed on a zero-area box, which is now fixed and retried successfully. |
+| Real camera, download → recognised | 11 clips: median 13 s, mean 14 s, maximum 33 s. The longest clips waited behind other downloads in a catch-up batch. |
+| App process while running | About 120 MB resident |
+
+The remaining misses:
+- two blue tits (still few examples)
+- the one sparrow, called a great tit
+- one great tit and one back view left unknown or empty
+- one close-up person and one empty clip called "unknown bird", both at low confidence
+
+Not measured: whether ffmpeg runs at the utility QoS level.

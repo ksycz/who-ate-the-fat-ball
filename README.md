@@ -18,10 +18,17 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
 - **A library** (SQLite plus a media folder) of every clip.
 - **A JSON API** on your home network: status, clips and media with range requests. Anyone on the network can view; changing data needs the edit PIN (or a request from the Mac itself).
 - **Demo mode** with a fake camera and generated clips, so you can try it without any hardware.
+- **Bird recognition on your own Mac**:
+  - A detector finds the animals and people in each new clip. Each animal is then matched against examples you labelled yourself.
+  - The species is named only when the match is clear; otherwise the clip is "Unknown bird". Dogs and people go to Other.
+  - Clips less than a minute apart with the same visitor are grouped into a visit.
+  - You can correct a visit through the API, and the correction teaches the matcher straight away. Undo takes it back.
+  - On the owner's 63 hand-labelled clips, it put 59 in the right section and named 13 of 17 clear birds.
+  - It takes about 1 s per clip, under 300 MB of memory, at low priority.
+  - On the real camera, new clips were recognised a median of 13 s after download.
 
 ## What's coming
 
-- **Plan 2: bird recognition.** Spot birds, name the species on your own computer, group clips into visits.
 - **Plan 3: the gallery.** A web app (installable on a phone or iPad) built from the prototypes in the design process.
 
 ## Try the demo
