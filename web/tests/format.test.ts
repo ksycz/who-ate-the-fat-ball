@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Visit } from "../src/lib/api";
-import { cameraStatus, clipBadge, durationText, sureChip, visitName, visitTime } from "../src/lib/format";
+import { cameraStatus, dayHeading, clipBadge, durationText, sureChip, visitName, visitTime } from "../src/lib/format";
 
 const TODAY = "2026-11-02";
 
@@ -115,5 +115,18 @@ describe("whenText", () => {
     expect(whenText("2026-11-03T06:10:00+01:00", "2026-11-03")).toBe("06:10");
     expect(whenText("2026-11-02T16:20:00+01:00", "2026-11-03")).toBe("yesterday 16:20");
     expect(whenText("2026-10-20T16:20:00+01:00", "2026-11-03")).toBe("20 Oct 16:20");
+  });
+});
+
+describe("dayHeading", () => {
+  it("names_today_and_yesterday_and_older_days", () => {
+    expect(dayHeading("2026-11-03", "2026-11-03")).toBe("Today");
+    expect(dayHeading("2026-11-02", "2026-11-03")).toBe("Yesterday");
+    expect(dayHeading("2026-10-31", "2026-11-03")).toBe("Saturday 31 October");
+  });
+  it("works_across_month_and_year_boundaries", () => {
+    expect(dayHeading("2026-10-31", "2026-11-01")).toBe("Yesterday");
+    expect(dayHeading("2025-12-31", "2026-01-01")).toBe("Yesterday");
+    expect(dayHeading("2025-12-30", "2026-01-01")).toBe("Tuesday 30 December");
   });
 });

@@ -102,7 +102,7 @@
     {/if}
 
     {#if data.new_species}
-      <div class="banner-slot"><NewSpeciesBanner species={data.new_species} /></div>
+      <NewSpeciesBanner species={data.new_species} />
     {/if}
 
     <div class="title">
@@ -186,7 +186,6 @@
   .notice-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
   .notice-head { font-size: 15px; font-weight: 600; }
   .notice-sub { font-size: 13px; color: var(--ink-2); }
-  .banner-slot { display: block; }
   .title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   h1 { margin: 0; font-weight: 800; font-size: 34px; letter-spacing: -0.8px; }
   .summary { font-size: 14px; color: var(--ink-2); }
@@ -224,9 +223,5 @@
   .retry button {
     min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-strong);
     background: #fff; color: var(--robin-dark); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-  }
-  /* On the side layout the New species banner moves to the top of Birds (spec section 8). */
-  @media (min-width: 768px) {
-    .banner-slot { display: none; }
   }
 </style>

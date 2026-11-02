@@ -119,3 +119,28 @@ export function cameraStatus(
     when === "today" ? clock(seen) : when === "yesterday" ? `yesterday ${clock(seen)}` : `${seen.d} ${MONTHS[seen.m - 1]}`;
   return { dot, text: `Camera not seen since ${since} · Check App status` };
 }
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// "Today", "Yesterday" or "Saturday 31 October" for a "YYYY-MM-DD" day, judged against the server's day.
+export function dayHeading(day: string, today: string): string {
+  if (day === today) return "Today";
+  const t = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!d) return day;
+  if (t) {
+    const y = new Date(Date.UTC(+t[1], +t[2] - 1, +t[3] - 1));
+    if (`${y.getUTCFullYear()}-${pad(y.getUTCMonth() + 1)}-${pad(y.getUTCDate())}` === day) return "Yesterday";
+  }
+  const date = new Date(Date.UTC(+d[1], +d[2] - 1, +d[3]));
+  return `${WEEKDAYS[date.getUTCDay()]} ${+d[3]} ${MONTH_NAMES[+d[2] - 1]}`;
+}
+
+// The calendar day ("YYYY-MM-DD") a timestamp was written on.
+export function dayOf(at: string): string {
+  return dayKey(parseWall(at));
+}

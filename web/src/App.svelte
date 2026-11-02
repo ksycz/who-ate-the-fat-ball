@@ -5,12 +5,9 @@
   import NavPhone from "./components/NavPhone.svelte";
   import Toast from "./components/Toast.svelte";
   import NavSide from "./components/NavSide.svelte";
+  import VisitList from "./pages/VisitList.svelte";
   import Today from "./pages/Today.svelte";
   import Visit from "./pages/Visit.svelte";
-  import Birds from "./pages/Birds.svelte";
-  import OtherAnimals from "./pages/OtherAnimals.svelte";
-  import Other from "./pages/Other.svelte";
-  import Favourites from "./pages/Favourites.svelte";
   import More from "./pages/More.svelte";
   import Status from "./pages/Status.svelte";
   import Unlock from "./pages/Unlock.svelte";
@@ -20,10 +17,6 @@
   const pages = {
     today: Today,
     visit: Visit,
-    birds: Birds,
-    "other-animals": OtherAnimals,
-    other: Other,
-    favourites: Favourites,
     more: More,
     status: Status,
     unlock: Unlock,
@@ -31,7 +24,19 @@
     notfound: NotFound,
   } as const;
 
-  const Page = $derived(pages[$route.name]);
+  const lists = {
+    birds: "birds",
+    "other-animals": "other_animals",
+    other: "other",
+    favourites: "favourites",
+  } as const;
+
+  const listKind = $derived(
+    $route.name === "birds" || $route.name === "other-animals" || $route.name === "other" || $route.name === "favourites"
+      ? lists[$route.name]
+      : null,
+  );
+  const Page = $derived(listKind ? null : pages[$route.name as keyof typeof pages]);
 
   onMount(() => {
     loadSession();
@@ -41,7 +46,11 @@
 <div class="shell">
   <NavSide />
   <main data-route={$route.name}>
-    <Page />
+    {#if listKind}
+      {#key listKind}<VisitList kind={listKind} />{/key}
+    {:else if Page}
+      <Page />
+    {/if}
   </main>
   <NavPhone />
 </div>

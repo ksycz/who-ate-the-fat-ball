@@ -4,9 +4,11 @@
   import { link } from "../lib/link";
   import Logo from "./Logo.svelte";
 
-  let { species }: { species: NonNullable<Today["new_species"]> } = $props();
+  // "today": shown on the phone's Today page only. "birds": shown on the side layout's Birds page only.
+  let { species, placement = "today" }: { species: NonNullable<Today["new_species"]>; placement?: "today" | "birds" } = $props();
 </script>
 
+<div class="slot" data-placement={placement}>
 <div class="banner" role="status">
   <Logo size={36} variant="mark" />
   <span class="text">
@@ -15,8 +17,14 @@
   </span>
   <a class="watch" href="/visit/{species.visit_id}" use:link>Watch</a>
 </div>
+</div>
 
 <style>
+  .slot[data-placement="birds"] { display: none; }
+  @media (min-width: 768px) {
+    .slot[data-placement="today"] { display: none; }
+    .slot[data-placement="birds"] { display: block; }
+  }
   .banner {
     display: flex;
     align-items: center;
