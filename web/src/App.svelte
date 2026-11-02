@@ -3,6 +3,7 @@
   import { route } from "./lib/router";
   import { loadSession } from "./lib/session";
   import NavPhone from "./components/NavPhone.svelte";
+  import Toast from "./components/Toast.svelte";
   import NavSide from "./components/NavSide.svelte";
   import Today from "./pages/Today.svelte";
   import Visit from "./pages/Visit.svelte";
@@ -44,6 +45,7 @@
   </main>
   <NavPhone />
 </div>
+<Toast />
 
 <style>
   .shell { display: flex; min-height: 100vh; }

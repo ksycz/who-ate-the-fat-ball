@@ -2,10 +2,11 @@
   import { tick } from "svelte";
   import { ApiError, getJSON, send, type Category, type Clip, type Visit } from "../lib/api";
   import { route, back } from "../lib/router";
-  import { canEdit, noteServerDay, serverDay, showToast } from "../lib/session";
+  import { canEdit, changes, noteServerDay, serverDay, showSaveFailure, showToast } from "../lib/session";
   import { speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "../components/Chip.svelte";
+  import Picker from "../components/Picker.svelte";
 
   interface Guess {
     scientific: string;
@@ -26,11 +27,12 @@
   let index = $state(0);
   let menuOpen = $state(false);
   let busy = $state(false);
-  let pickerOpen = $state(false); // Task 7 hooks the picker in here
+  let pickerOpen = $state(false);
   let watchedSent = false;
   let player = $state<HTMLVideoElement | null>(null);
   let menuEl = $state<HTMLElement | null>(null);
   let dlButton = $state<HTMLButtonElement | null>(null);
+  let changeButton = $state<HTMLButtonElement | null>(null);
 
   const id = $derived($route.params.id);
 
@@ -63,6 +65,14 @@
         .catch(() => {
           // show times without a day prefix until it is known
         });
+    }
+  });
+  // An undo elsewhere (the toast) changed this visit on the server: fetch it again.
+  let seenChanges = $changes;
+  $effect(() => {
+    if ($changes !== seenChanges) {
+      seenChanges = $changes;
+      reload();
     }
   });
   const alternatives = $derived(visit?.guesses.slice(1, 3) ?? []);
@@ -118,11 +128,17 @@
           ? `Moved to ${CATEGORY_NAMES[fresh.category]}`
           : `Changed to ${speciesLabel(g)}`;
       showToast(text, undo_token);
-    } catch {
-      showToast("Couldn't save that. Try again.");
+    } catch (e) {
+      showSaveFailure(e);
     } finally {
       busy = false;
     }
+  }
+
+  async function closePicker() {
+    pickerOpen = false;
+    await tick();
+    changeButton?.focus(); // focus goes back to the button that opened it
   }
 
   async function toggleFavourite() {
@@ -135,8 +151,8 @@
       });
       visit = { ...visit, is_favourite: want };
       showToast(want ? "Added to Favourites" : "Removed from Favourites", undo_token);
-    } catch {
-      showToast("Couldn't save that. Try again.");
+    } catch (e) {
+      showSaveFailure(e);
     } finally {
       busy = false;
     }
@@ -205,7 +221,7 @@
           {/if}
         </div>
         {#if $canEdit}
-          <button type="button" class="change" onclick={() => (pickerOpen = !pickerOpen)} aria-expanded={pickerOpen}>
+          <button type="button" class="change" bind:this={changeButton} onclick={() => (pickerOpen = true)} aria-haspopup="dialog">
             Not right? Change
           </button>
         {/if}
@@ -273,6 +289,10 @@
     {/if}
   {/if}
 </div>
+
+{#if pickerOpen && visit && $canEdit}
+  <Picker {visit} onclose={closePicker} onchanged={() => reload()} />
+{/if}
 
 <style>
   .visit { display: flex; flex-direction: column; gap: 16px; padding-bottom: 20px; }
