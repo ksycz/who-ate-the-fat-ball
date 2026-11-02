@@ -2,9 +2,9 @@
   import type { Camera } from "../lib/api";
   import { cameraStatus } from "../lib/format";
 
-  let { camera, now, short = false }: { camera: Camera; now: Date; short?: boolean } = $props();
+  let { camera, now, today, short = false }: { camera: Camera; now: Date; today: string; short?: boolean } = $props();
 
-  const s = $derived(cameraStatus(camera, now));
+  const s = $derived(cameraStatus(camera, now, today));
   // The short form drops the "Check App status" hint; the problem notice carries it instead.
   const text = $derived(short && s.dot === "problem" ? "Camera not seen" : s.text);
 </script>

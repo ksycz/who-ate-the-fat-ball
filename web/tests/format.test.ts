@@ -73,24 +73,31 @@ describe("visitName", () => {
 describe("cameraStatus", () => {
   const now = new Date(2026, 10, 2, 12, 0, 0);
   it("ok", () => {
-    expect(cameraStatus({ state: "ok", last_seen_at: "2026-11-02T11:55:00", last_error: null }, now))
+    expect(cameraStatus({ state: "ok", last_seen_at: "2026-11-02T11:55:00", last_error: null }, now, "2026-11-02"))
       .toEqual({ dot: "ok", text: "Camera seen 5 min ago" });
-    expect(cameraStatus({ state: "ok", last_seen_at: "2026-11-02T11:59:40", last_error: null }, now).text)
+    expect(cameraStatus({ state: "ok", last_seen_at: "2026-11-02T11:59:40", last_error: null }, now, "2026-11-02").text)
       .toBe("Camera seen just now");
   });
   it("asleep", () => {
-    expect(cameraStatus({ state: "asleep", last_seen_at: "2026-11-02T06:10:00", last_error: null }, now))
+    expect(cameraStatus({ state: "asleep", last_seen_at: "2026-11-02T06:10:00", last_error: null }, now, "2026-11-02"))
       .toEqual({ dot: "asleep", text: "Camera asleep · seen 06:10" });
   });
   it("problem", () => {
-    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-01T18:40:00", last_error: "x" }, now))
+    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-01T18:40:00", last_error: "x" }, now, "2026-11-02"))
       .toEqual({ dot: "problem", text: "Camera not seen since yesterday 18:40 · Check App status" });
-    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-02T08:05:00", last_error: "x" }, now).text)
+    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-02T08:05:00", last_error: "x" }, now, "2026-11-02").text)
       .toBe("Camera not seen since 08:05 · Check App status");
-    expect(cameraStatus({ state: "problem", last_seen_at: "2026-10-31T18:40:00", last_error: "x" }, now).text)
+    expect(cameraStatus({ state: "problem", last_seen_at: "2026-10-31T18:40:00", last_error: "x" }, now, "2026-11-02").text)
       .toBe("Camera not seen since 31 Oct · Check App status");
-    expect(cameraStatus({ state: "problem", last_seen_at: null, last_error: null }, now).text)
+    expect(cameraStatus({ state: "problem", last_seen_at: null, last_error: null }, now, "2026-11-02").text)
       .toBe("Camera not seen yet · Check App status");
+  });
+  it("problem_day_label_uses_the_servers_day_not_the_browser_clock", () => {
+    // Browser clock says the 2nd; the server says the 3rd.
+    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-02T18:40:00", last_error: "x" }, now, "2026-11-03").text)
+      .toBe("Camera not seen since yesterday 18:40 · Check App status");
+    expect(cameraStatus({ state: "problem", last_seen_at: "2026-11-02T18:40:00", last_error: "x" }, now, "2026-11-02").text)
+      .toBe("Camera not seen since 18:40 · Check App status");
   });
 });
 

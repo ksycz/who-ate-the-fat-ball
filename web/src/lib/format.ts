@@ -101,6 +101,7 @@ export function visitName(visit: Visit): string {
 export function cameraStatus(
   camera: Status["camera"],
   now: Date,
+  today: string,
 ): { dot: "ok" | "asleep" | "problem"; text: string } {
   const dot = camera.state;
   const seen = camera.last_seen_at ? parseWall(camera.last_seen_at) : null;
@@ -113,7 +114,6 @@ export function cameraStatus(
     return { dot, text: seen ? `Camera asleep · seen ${clock(seen)}` : "Camera asleep" };
   }
   if (!seen) return { dot, text: "Camera not seen yet · Check App status" };
-  const today = dayKey(nowWall(now));
   const when = dayLabel(seen, today);
   const since =
     when === "today" ? clock(seen) : when === "yesterday" ? `yesterday ${clock(seen)}` : `${seen.d} ${MONTHS[seen.m - 1]}`;

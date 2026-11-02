@@ -34,6 +34,10 @@ def test_status_ok_asleep_problem(local, conn, cam):
     assert body["state"] == "problem" and body["last_error"] == "wrong_password"
 
 
+def test_status_reports_the_servers_day(local):
+    assert _status(local)["day"] == NOW.astimezone().date().isoformat()
+
+
 @pytest.mark.parametrize(("error", "state"), [
     ("download_interrupted", "ok"),
     ("clock_error", "ok"),

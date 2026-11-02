@@ -70,7 +70,7 @@
   {/if}
 
   <div class="camera">
-    {#if status}<CameraStatus camera={status.camera} {now} />{/if}
+    {#if status}<CameraStatus camera={status.camera} {now} today={status.day} />{/if}
   </div>
 </nav>
 

@@ -161,6 +161,7 @@ def create_app(
     def status(conn: Conn):
         free = shutil.disk_usage(settings.data_dir).free
         return {
+            "day": now().astimezone().date().isoformat(),
             "camera": camera_json(conn),
             "sorted": repo.sorted_counts(conn),
             "queue": repo.queue_counts(conn),

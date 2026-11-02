@@ -83,6 +83,13 @@ describe("Today", () => {
     ).toBeTruthy();
   });
 
+  it("empty_state_links_to_yesterdays_visits", async () => {
+    serve(today({ summary: { visits: 0, species: 0 }, champion: null, visits: [] }));
+    render(Today);
+    const a = await screen.findByRole("link", { name: "See yesterday’s visits" });
+    expect(a.getAttribute("href")).toBe("/birds");
+  });
+
   it("empty_state_leaves_out_missing_last_visitor", async () => {
     serve(today({ summary: { visits: 0, species: 0 }, champion: null, visits: [], last_visitor: null }));
     render(Today);

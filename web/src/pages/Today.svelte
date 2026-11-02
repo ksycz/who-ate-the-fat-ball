@@ -86,7 +86,7 @@
 <div class="today">
   <header>
     <div class="brand"><Logo size={30} />Who Ate the Fat Ball?</div>
-    {#if data}<span class="pill"><CameraStatus camera={data.camera} {now} short /></span>{/if}
+    {#if data}<span class="pill"><CameraStatus camera={data.camera} {now} today={data.day} short /></span>{/if}
   </header>
 
   {#if data}
@@ -118,6 +118,7 @@
         <Logo size={56} />
         <div class="empty-head">Quiet so far</div>
         <div class="empty-text">{emptyText(data)}</div>
+        <a class="yesterday" href="/birds" use:link>See yesterday’s visits</a>
       </div>
     {/if}
 
@@ -194,6 +195,10 @@
   }
   .empty-head { font-size: 18px; font-weight: 600; }
   .empty-text { font-size: 14px; color: var(--ink-2); max-width: 260px; }
+  .yesterday {
+    display: flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 10px;
+    border: 1px solid var(--line-strong); color: var(--robin-dark); font-size: 14px; font-weight: 600;
+  }
   .champion { display: flex; align-items: center; gap: 14px; border-radius: 18px; padding: 12px; background: #fff; color: var(--ink); }
   .champ-photo { flex: none; width: 76px; height: 76px; border-radius: 14px; overflow: hidden; background: var(--sand); }
   .champ-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }

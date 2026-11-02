@@ -34,6 +34,7 @@
     border-radius: 24px;
     background: #fff;
     border: 1px solid var(--line);
+    box-shadow: 0 6px 18px rgba(40, 30, 20, 0.12);
   }
   a {
     display: flex;
