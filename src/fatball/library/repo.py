@@ -369,3 +369,68 @@ def recognition_counts(conn: sqlite3.Connection) -> dict[str, int]:
         "COALESCE(SUM(recognition_error IS NOT NULL), 0) AS errors FROM clip"
     ).fetchone()
     return {"pending": row["pending"], "errors": row["errors"]}
+
+
+def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
+    rows = conn.execute(
+        "SELECT c.* FROM clip c JOIN visit_clip vc ON vc.clip_id = c.id WHERE vc.visit_id = ? "
+        "ORDER BY c.begin_at, c.id",
+        (visit_id,),
+    )
+    return [_clip(r) for r in rows]
+
+
+def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
+    """Clear both recognition markers so the backfill picks the clip up again; False for an unknown clip."""
+    cur = conn.execute("UPDATE clip SET recognition_error = NULL, recognized_at = NULL WHERE id = ?", (clip_id,))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+_VISIT_SELECT = (
+    "SELECT v.*, s.scientific_name AS species_scientific, n.name AS species_name, "
+    "(SELECT COUNT(*) FROM visit_clip vc WHERE vc.visit_id = v.id) AS clip_count "
+    "FROM visit v LEFT JOIN species s ON s.id = v.species_id "
+    "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+)
+
+
+def list_visits(
+    conn: sqlite3.Connection,
+    limit: int,
+    *,
+    after: tuple[str, int] | None = None,
+    category: str | None = None,
+    species: str | None = None,
+    day: date | None = None,
+) -> list[sqlite3.Row]:
+    """Visits newest first. `after` is the (started_at, id) of the last visit already seen; `day` is the
+    local date of started_at (stored as local-time ISO text, like clips)."""
+    where, args = [], []
+    if after is not None:
+        where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
+        args += [after[0], after[0], after[1]]
+    if category is not None:
+        where.append("v.category = ?")
+        args.append(category)
+    if species is not None:
+        where.append("s.scientific_name = ?")
+        args.append(species)
+    if day is not None:
+        where.append("substr(v.started_at, 1, 10) = ?")
+        args.append(day.isoformat())
+    clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
+    return conn.execute(f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?", (*args, limit)).fetchall()
+
+
+def get_visit(conn: sqlite3.Connection, visit_id: int) -> sqlite3.Row | None:
+    return conn.execute(f"{_VISIT_SELECT}WHERE v.id = ?", (visit_id,)).fetchone()
+
+
+def visit_guesses(conn: sqlite3.Connection, visit_id: int) -> list[sqlite3.Row]:
+    """The visit's best species guesses in rank order, with English names."""
+    return conn.execute(
+        "SELECT s.scientific_name, n.name, g.confidence FROM guess g JOIN species s ON s.id = g.species_id "
+        "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' WHERE g.visit_id = ? ORDER BY g.rank",
+        (visit_id,),
+    ).fetchall()

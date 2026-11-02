@@ -78,6 +78,10 @@ def _remove_from_current_visit(conn: sqlite3.Connection, clip_id: int) -> None:
 
 
 def _delete_visit(conn: sqlite3.Connection, visit_id: int) -> None:
+    # An owner-edited visit has correction and undo rows: they go first (foreign keys), and a stale undo
+    # token must not survive to hit a new visit that reuses this id.
+    conn.execute("DELETE FROM undo WHERE visit_id = ?", (visit_id,))
+    conn.execute("DELETE FROM correction WHERE visit_id = ?", (visit_id,))
     conn.execute("DELETE FROM guess WHERE visit_id = ?", (visit_id,))
     conn.execute("DELETE FROM visit WHERE id = ?", (visit_id,))
 
@@ -137,8 +141,6 @@ def _can_merge(target_species: int | None, other: sqlite3.Row) -> bool:
 
 
 def _merge_into(conn: sqlite3.Connection, target_id: int, other_id: int) -> None:
-    # Only owner-edited visits have correction rows and those are never merged away, so nothing
-    # references `other_id` besides its clips and guesses (the correction foreign key would fail loudly).
     conn.execute("UPDATE visit_clip SET visit_id = ? WHERE visit_id = ?", (target_id, other_id))
     _delete_visit(conn, other_id)
 

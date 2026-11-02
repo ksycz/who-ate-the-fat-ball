@@ -1,10 +1,12 @@
-"""The HTTP API: status, clips, media, local-only setup and edit unlock."""
+"""The HTTP API: status, clips, visits (with corrections and undo), media, local-only setup and edit unlock."""
 
+import base64
+import binascii
 import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
-from datetime import datetime, timedelta
-from typing import Annotated
+from datetime import date, datetime, timedelta
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -15,7 +17,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import db, repo
+from fatball.library import corrections, db, repo
 
 RECENT = timedelta(hours=1)
 # Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
@@ -36,6 +38,14 @@ class UnlockBody(BaseModel):
     pin: str
 
 
+class VisitPatch(BaseModel):
+    """`species` present as null means 'no species'; absent means unchanged."""
+
+    species: str | None = None
+    category: Literal["birds", "other_animals", "other"] | None = None
+    is_favourite: bool | None = None
+
+
 def _local_now() -> datetime:
     return datetime.now().astimezone()
 
@@ -53,6 +63,52 @@ def _camera_state(cam: repo.Camera | None, now: datetime) -> str:
 
 def _media_url(path: str | None) -> str | None:
     return f"/media/{path}" if path else None
+
+
+def _clip_json(c: repo.Clip) -> dict:
+    return {
+        "id": c.id,
+        "begin_at": c.begin_at.isoformat(),
+        "end_at": c.end_at.isoformat(),
+        "kind": _KIND_NAMES.get(c.kind, c.kind),
+        "duration_s": c.duration_s,
+        "web_url": _media_url(c.web_path),
+        "original_url": _media_url(c.original_path),
+        "poster_url": _media_url(c.poster_path),
+        "preview_url": _media_url(c.preview_path),
+    }
+
+
+def _visit_json(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "started_at": row["started_at"],
+        "ended_at": row["ended_at"],
+        "category": row["category"],
+        "species": (
+            {"scientific": row["species_scientific"], "name": row["species_name"]}
+            if row["species_scientific"] else None
+        ),
+        "subject": row["subject"],
+        "confidence": row["confidence"],
+        "is_favourite": bool(row["is_favourite"]),
+        "best_frame_url": _media_url(row["best_frame_path"]),
+        "clip_count": row["clip_count"],
+    }
+
+
+def _encode_cursor(row: sqlite3.Row) -> str:
+    return base64.urlsafe_b64encode(f"{row['started_at']}|{row['id']}".encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[str, int]:
+    try:
+        started_at, _, visit_id = base64.urlsafe_b64decode(cursor.encode()).decode().rpartition("|")
+        if not started_at:
+            raise ValueError
+        return started_at, int(visit_id)
+    except (ValueError, binascii.Error):  # UnicodeDecodeError is a ValueError
+        raise HTTPException(status_code=400, detail="invalid cursor") from None
 
 
 def create_app(
@@ -96,20 +152,65 @@ def create_app(
     @app.get("/api/clips")
     def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
         rows = repo.list_clips(conn, limit, before, status="ready")
-        return [
-            {
-                "id": c.id,
-                "begin_at": c.begin_at.isoformat(),
-                "end_at": c.end_at.isoformat(),
-                "kind": _KIND_NAMES.get(c.kind, c.kind),
-                "duration_s": c.duration_s,
-                "web_url": _media_url(c.web_path),
-                "original_url": _media_url(c.original_path),
-                "poster_url": _media_url(c.poster_path),
-                "preview_url": _media_url(c.preview_path),
-            }
-            for c in rows
-        ]
+        return [_clip_json(c) for c in rows]
+
+    @app.get("/api/visits")
+    def visits(
+        conn: Conn,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+        category: Literal["birds", "other_animals", "other"] | None = None,
+        species: str | None = None,
+        day: date | None = None,
+    ):
+        """Newest first. `day` is the local date of the visit's start (as stored)."""
+        after = _decode_cursor(cursor) if cursor else None
+        rows = repo.list_visits(conn, limit + 1, after=after, category=category, species=species, day=day)
+        page = rows[:limit]
+        return {
+            "items": [_visit_json(r) for r in page],
+            "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None,
+        }
+
+    @app.get("/api/visits/{visit_id}")
+    def visit_detail(visit_id: int, conn: Conn):
+        row = repo.get_visit(conn, visit_id)
+        if row is None:
+            raise HTTPException(status_code=404)
+        return {
+            **_visit_json(row),
+            "clips": [_clip_json(c) for c in repo.clips_for_visit(conn, visit_id)],
+            "guesses": [
+                {"scientific": g["scientific_name"], "name": g["name"], "confidence": g["confidence"]}
+                for g in repo.visit_guesses(conn, visit_id)
+            ],
+        }
+
+    @app.patch("/api/visits/{visit_id}", dependencies=[Depends(auth_mod.require_editor)])
+    def patch_visit(visit_id: int, body: VisitPatch, conn: Conn):
+        change = corrections.Change(
+            species=body.species if "species" in body.model_fields_set else corrections.UNSET,
+            category=body.category,
+            is_favourite=body.is_favourite,
+        )
+        try:
+            return {"undo_token": corrections.apply(conn, visit_id, change, now().astimezone())}
+        except corrections.VisitNotFound:
+            raise HTTPException(status_code=404) from None
+        except corrections.InvalidChange as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+
+    @app.post("/api/undo/{token}", status_code=204, dependencies=[Depends(auth_mod.require_editor)])
+    def undo(token: str, conn: Conn):
+        try:
+            corrections.undo(conn, token, now().astimezone())
+        except corrections.UnknownToken:
+            raise HTTPException(status_code=404) from None
+
+    @app.post("/api/retry/{clip_id}", status_code=204, dependencies=[Depends(auth_mod.require_editor)])
+    def retry(clip_id: int, conn: Conn):
+        if not repo.requeue_recognition(conn, clip_id):
+            raise HTTPException(status_code=404)
 
     @app.get("/media/{path:path}")
     def media(path: str):

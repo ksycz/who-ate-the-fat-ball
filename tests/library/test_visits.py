@@ -249,3 +249,16 @@ def test_unknown_first_visit_never_collapses_two_species(conn, cam):
     assert visit_count(conn) == 2
     species = {r[0] for r in conn.execute("SELECT species_id FROM visit")}
     assert len(species) == 2
+
+
+def test_emptied_moved_visit_with_correction_is_deleted_with_its_rows(conn, cam):
+    clip, v = recognise(conn, cam, 0, sure(GREAT))
+    conn.execute("UPDATE visit SET moved_by_user = 1 WHERE id = ?", (v,))
+    conn.execute("INSERT INTO correction(visit_id, created_at) VALUES (?, 'now')", (v,))
+    conn.execute("INSERT INTO undo(token, visit_id, before_json, created_at) VALUES ('t', ?, '{}', 'now')", (v,))
+    conn.commit()
+    new = assign_visit(conn, clip, sure(BLUE))  # re-recognised: the owner's visit empties and is deleted
+    assert conn.execute("SELECT moved_by_user FROM visit WHERE id = ?", (new,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM correction").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM undo").fetchone()[0] == 0
+    assert visit_count(conn) == 1
