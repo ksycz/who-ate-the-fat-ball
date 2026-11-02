@@ -11,3 +11,12 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Local agent workspaces
+.superpowers/
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Local prototype scripts and real-camera data (never committed)
+local/
