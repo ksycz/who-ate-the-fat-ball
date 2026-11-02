@@ -23,6 +23,11 @@ from fatball.library import corrections, db, repo, today
 
 STATIC_DIR = Path(__file__).parent / "static"
 NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
+# The service worker must always be re-fetched, or a stale one keeps serving an old app shell.
+ROOT_FILE_OPTIONS = {
+    "manifest.webmanifest": {"media_type": "application/manifest+json"},
+    "sw.js": {"media_type": "text/javascript", "headers": {"Cache-Control": "no-cache"}},
+}
 RECENT = timedelta(hours=1)
 # Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
 # Everything else (an interrupted download, a clock that could not be set...) is reported in last_error
@@ -336,6 +341,11 @@ def create_app(
     def gallery(path: str):
         if path.split("/")[0] in ("api", "media"):
             raise HTTPException(status_code=404)
+        # Root files from web/public (manifest, service worker, icons); never anything outside the static dir.
+        if path and "/" not in path:
+            target = (static_root / path).resolve()
+            if target.parent == static_root and target.name != "index.html" and target.is_file():
+                return FileResponse(target, **ROOT_FILE_OPTIONS.get(path, {}))
         index = static_root / "index.html"
         if not index.is_file():
             return PlainTextResponse(NOT_BUILT, status_code=503)
