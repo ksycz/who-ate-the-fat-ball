@@ -6,8 +6,17 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
-from fatball.recognition.detector import Detection, Detector, ModelMissing, compiled_model, decode
+from fatball.recognition.detector import (
+    INPUT_SIZE,
+    Detection,
+    Detector,
+    ModelMissing,
+    compiled_model,
+    decode,
+    letterbox,
+)
 
 
 def row(cx, cy, w, h, animal=0.0, person=0.0, vehicle=0.0):
@@ -61,6 +70,41 @@ def test_decode_clips_box_to_the_image():
     assert isinstance(det, Detection)
 
 
+GREY = (114, 114, 114)
+
+
+def test_letterbox_scales_to_fit_and_centres_on_grey():
+    # 1280x720 scales by 0.5 to 640x360, centred with 140 grey rows above and below.
+    out = letterbox(Image.new("RGB", (1280, 720), (255, 0, 0)))
+    assert out.size == (INPUT_SIZE, INPUT_SIZE) and out.mode == "RGB"
+    assert out.getpixel((320, 139)) == GREY and out.getpixel((320, 500)) == GREY
+    assert out.getpixel((0, 140)) == (255, 0, 0) and out.getpixel((639, 499)) == (255, 0, 0)
+    assert out.getpixel((0, 0)) == GREY and out.getpixel((639, 639)) == GREY
+
+
+def test_letterbox_truncates_size_and_floors_the_offset_like_pytorchwildlife():
+    # 1280x723 scales by 0.5 to 640x361.5: int() keeps 361 rows, and (640 - 361) // 2 puts the first at row 139.
+    out = letterbox(Image.new("RGB", (1280, 723), (0, 0, 255)))
+    assert out.getpixel((320, 138)) == GREY and out.getpixel((320, 139)) == (0, 0, 255)
+    assert out.getpixel((320, 499)) == (0, 0, 255) and out.getpixel((320, 500)) == GREY
+
+
+def test_letterbox_converts_to_rgb():
+    assert letterbox(Image.new("L", (720, 1280), 200)).getpixel((320, 320)) == (200, 200, 200)
+
+
+def test_decode_undoes_the_letterbox():
+    # A white block at x 320..640, y 180..540 of a dark 1280x720 frame; find it in the letterboxed image and decode.
+    frame = Image.new("RGB", (1280, 720), (0, 0, 0))
+    frame.paste((255, 255, 255), (320, 180, 640, 540))
+    pixels = np.asarray(letterbox(frame)).min(axis=2) > 200
+    ys, xs = np.nonzero(pixels)
+    x1, y1, x2, y2 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+    raw = np.array([row((x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1, animal=0.9)], dtype=np.float32)
+    [det] = decode(raw, 1280, 720)
+    assert det.box == pytest.approx((0.25, 0.25, 0.5, 0.75), abs=1 / 640)
+
+
 def test_detector_missing_model_raises(tmp_path):
     with pytest.raises(ModelMissing):
         Detector(tmp_path / "nope.mlpackage")
@@ -80,6 +124,17 @@ def test_detector_on_real_model(tmp_path):
     result = detector.detect(frame)
     assert isinstance(result, list)
     assert time.perf_counter() - start < 0.5
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("FATBALL_DETECTOR") and os.environ.get("FATBALL_TEST_FRAME")),
+    reason="FATBALL_DETECTOR (the .mlpackage) and FATBALL_TEST_FRAME (a private close-up bird frame) not both set",
+)
+def test_detector_calls_a_close_up_bird_an_animal():
+    # A close-up great tit at the feeder: MegaDetector as published says animal; eval-mode BatchNorm said person.
+    detections = Detector(Path(os.environ["FATBALL_DETECTOR"])).detect(Path(os.environ["FATBALL_TEST_FRAME"]))
+    assert max((d.conf for d in detections if d.cls == "animal"), default=0.0) >= 0.8
+    assert not [d for d in detections if d.cls == "person" and d.conf >= 0.3]
 
 
 def _package(tmp_path):

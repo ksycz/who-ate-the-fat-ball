@@ -12,6 +12,11 @@ The result is OUT_DIR/md_v6_mit_c.mlpackage (about 20 MB, never committed). The 
 <data_dir>/models/md_v6_mit_c.mlpackage. The model returns one tensor (N, 7) with one row per anchor:
 [cx, cy, w, h, p_animal, p_person, p_vehicle], in 640-pixel input coordinates. There is no NMS in the model;
 fatball.recognition.detector does the thresholding and NMS.
+
+MegaDetector as published runs with per-image normalisation: PytorchWildlife never calls .eval(), so its
+BatchNorm layers normalise each image by its own statistics (training mode, batch size 1). The export keeps
+that behaviour by swapping every BatchNorm2d for instance normalisation with the same weights; running
+statistics would call close-up birds "person". The app letterboxes frames on grey 114, as PytorchWildlife does.
 """
 
 import sys
@@ -19,6 +24,7 @@ from pathlib import Path
 
 import coremltools as ct
 import torch
+import torch.nn.functional as F
 from PytorchWildlife.models import detection as pw_detection
 
 MODEL_NAME = "md_v6_mit_c.mlpackage"
@@ -47,6 +53,27 @@ class Wrapped(torch.nn.Module):
         return torch.cat([(x1y1 + x2y2) / 2, wh, cls_logits.sigmoid()], dim=-1)[0]
 
 
+class PerImageNorm(torch.nn.Module):
+    """A BatchNorm2d in training mode at batch size 1: each image normalised by its own statistics.
+
+    Unlike a train-mode BatchNorm it never updates (or reads) the running statistics."""
+
+    def __init__(self, bn: torch.nn.BatchNorm2d):
+        super().__init__()
+        self.weight, self.bias, self.eps = bn.weight, bn.bias, bn.eps
+
+    def forward(self, x):
+        return F.instance_norm(x, weight=self.weight, bias=self.bias, eps=self.eps)
+
+
+def _per_image_norm(module: torch.nn.Module) -> None:
+    for name, child in module.named_children():
+        if isinstance(child, torch.nn.BatchNorm2d):
+            setattr(module, name, PerImageNorm(child))
+        else:
+            _per_image_norm(child)
+
+
 def _patch_anchor2vec(model) -> None:
     """Anchor2Vec unpacks x.shape into reshape(), which coremltools cannot convert; use -1 instead."""
 
@@ -65,6 +92,7 @@ def main(out_dir: Path) -> None:
     # The YOLO-MIT wrapper only builds its model lazily, inside single_image_detection().
     detector._load_model(weights=detector.weights, device=detector.device, url=detector.url)
     _patch_anchor2vec(detector.model)
+    _per_image_norm(detector.model)
     wrapped = Wrapped(detector.model, detector.converter).eval()
     example = torch.zeros(1, 3, SIZE, SIZE)
     with torch.no_grad():

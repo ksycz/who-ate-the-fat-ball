@@ -2,9 +2,11 @@
 
 The model is built by scripts/export_detector.py. It returns one row per anchor,
 [cx, cy, w, h, p_animal, p_person, p_vehicle], in 640x640 input pixels, with no NMS.
-Vision letterboxes the frame into the square input (scale to fit, centred); `decode` undoes that.
+`letterbox` fits the frame into the square input exactly as PytorchWildlife does (the model's scores depend on
+it); `decode` undoes that.
 """
 
+import io
 import os
 import shutil
 from collections.abc import Callable
@@ -13,9 +15,11 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from PIL import Image
 
 MODEL_FILENAME = "md_v6_mit_c.mlpackage"
 INPUT_SIZE = 640
+LETTERBOX_FILL = (114, 114, 114)
 NMS_IOU = 0.5
 CLASSES: tuple[Literal["animal", "person", "vehicle"], ...] = ("animal", "person", "vehicle")
 
@@ -31,6 +35,18 @@ class Detection:
     cls: Literal["animal", "person", "vehicle"]
     conf: float
     box: tuple[float, float, float, float]  # normalised x1, y1, x2, y2; origin top-left
+
+
+def letterbox(image: Image.Image) -> Image.Image:
+    """The frame scaled to fit INPUT_SIZE x INPUT_SIZE and centred on grey, as PytorchWildlife's LetterBox does:
+    LANCZOS resize to int() sizes, offsets by floor division, fill (114, 114, 114)."""
+    width, height = image.size
+    scale = min(INPUT_SIZE / width, INPUT_SIZE / height)
+    new_w, new_h = int(width * scale), int(height * scale)
+    resized = image.convert("RGB").resize((new_w, new_h), Image.Resampling.LANCZOS)
+    out = Image.new("RGB", (INPUT_SIZE, INPUT_SIZE), LETTERBOX_FILL)
+    out.paste(resized, ((INPUT_SIZE - new_w) // 2, (INPUT_SIZE - new_h) // 2))
+    return out
 
 
 def decode(raw: np.ndarray, image_w: int, image_h: int, conf_min: float = 0.1) -> list[Detection]:
@@ -116,9 +132,9 @@ class Detector:
         # Imported here so the pure-numpy decode works (and tests run) without the Apple frameworks.
         import CoreML
         import Vision
-        from Foundation import NSURL
+        from Foundation import NSURL, NSData
 
-        self._CoreML, self._Vision, self._NSURL = CoreML, Vision, NSURL
+        self._Vision, self._NSData = Vision, NSData
 
         def compile_fn(package: Path) -> Path:
             url, error = CoreML.MLModel.compileModelAtURL_error_(NSURL.fileURLWithPath_(str(package)), None)
@@ -135,22 +151,29 @@ class Detector:
             raise ModelMissing(f"Vision rejected {model_path}: {error}")
 
     def detect(self, image_path: Path) -> list[Detection]:
-        from PIL import Image
+        import objc
 
         with Image.open(image_path) as img:
             width, height = img.size
-        request = self._Vision.VNCoreMLRequest.alloc().initWithModel_(self._model)
-        request.setImageCropAndScaleOption_(self._Vision.VNImageCropAndScaleOptionScaleFit)
-        handler = self._Vision.VNImageRequestHandler.alloc().initWithURL_options_(
-            self._NSURL.fileURLWithPath_(str(image_path)), {}
-        )
-        ok, error = handler.performRequests_error_([request], None)
-        if not ok:
-            raise RuntimeError(f"Vision failed on {image_path}: {error}")
-        results = request.results()
-        if not results:
-            return []
-        return decode(_to_numpy(results[0].featureValue().multiArrayValue()), width, height)
+            square = letterbox(img)
+        buffer = io.BytesIO()
+        square.save(buffer, "BMP")  # uncompressed: cheaper than PNG, and Vision reads it as is
+        data = buffer.getvalue()
+        # The image data and Vision's copies of it are autoreleased, and no run loop drains them on this thread.
+        with objc.autorelease_pool():
+            request = self._Vision.VNCoreMLRequest.alloc().initWithModel_(self._model)
+            # The image is already the model's size, so this scaling is a no-op.
+            request.setImageCropAndScaleOption_(self._Vision.VNImageCropAndScaleOptionScaleFill)
+            handler = self._Vision.VNImageRequestHandler.alloc().initWithData_options_(
+                self._NSData.dataWithBytes_length_(data, len(data)), {}
+            )
+            ok, error = handler.performRequests_error_([request], None)
+            if not ok:
+                raise RuntimeError(f"Vision failed on {image_path}: {error}")
+            results = request.results()
+            if not results:
+                return []
+            return decode(_to_numpy(results[0].featureValue().multiArrayValue()), width, height)
 
 
 def _to_numpy(array) -> np.ndarray:
