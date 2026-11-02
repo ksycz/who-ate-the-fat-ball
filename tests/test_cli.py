@@ -10,17 +10,19 @@ import pytest
 
 from fatball import cli
 from fatball.api.auth import PIN_KEY
+from fatball.camera.client import XMClient
+from fatball.camera.protocol import sofia_hash
 from fatball.config import Settings
 from fatball.library import repo
 from fatball.library.db import connect
 
 
-def test_cli_help_lists_serve_demo_setup(capsys):
+def test_cli_help_lists_all_commands(capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main(["--help"])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for command in ("serve", "demo", "setup"):
+    for command in ("serve", "demo", "setup", "set-camera-password"):
         assert command in out
 
 
@@ -148,3 +150,45 @@ def test_processor_loop_survives_errors_and_stops(tmp_path):
 
     cli.processor_loop(Flaky(), stop, interval_s=0.01)
     assert len(calls) == 3
+
+
+@pytest.fixture
+def set_pw_cli(tmp_path, fake_camera):
+    def run(*, secret, stored="", ip="127.0.0.1"):
+        saved: list[str] = []
+        settings = Settings(data_dir=tmp_path / "data", camera_port=fake_camera.port)
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        if ip:
+            c = connect(settings.db_path)
+            repo.upsert_camera(c, "feeder", None, ip)
+            c.close()
+        code = cli.run_set_camera_password(
+            settings, getpass_fn=Prompts(*secret), get_password=lambda: stored, set_password=saved.append,
+            connect=lambda host, port: XMClient(host, port, timeout=2.0, silence_s=0.5))
+        return code, saved
+
+    return run
+
+
+def test_set_camera_password_changes_checks_and_saves(set_pw_cli, fake_camera, capsys):
+    code, saved = set_pw_cli(secret=["garden-robin", "garden-robin"])
+    assert code == 0
+    assert saved == ["garden-robin"]
+    assert fake_camera.password_hash == sofia_hash("garden-robin")
+    assert "garden-robin" not in capsys.readouterr().out
+
+
+def test_set_camera_password_mismatch_or_short_changes_nothing(set_pw_cli, fake_camera):
+    assert set_pw_cli(secret=["garden-robin", "garden-robim"]) == (1, [])
+    assert set_pw_cli(secret=["abc", "abc"]) == (1, [])
+    assert fake_camera.password_hash == sofia_hash("")
+
+
+def test_set_camera_password_refuses_when_the_saved_password_is_wrong(set_pw_cli, fake_camera):
+    fake_camera.password = "something-else"
+    assert set_pw_cli(secret=[]) == (1, [])
+    assert fake_camera.password == "something-else"
+
+
+def test_set_camera_password_needs_a_known_camera_ip(set_pw_cli):
+    assert set_pw_cli(secret=[], ip=None) == (1, [])

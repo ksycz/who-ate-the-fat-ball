@@ -44,6 +44,16 @@ scripts/install-launchagent.sh   # optional: start at login and restart after a 
 
 The setup page is only available at <http://localhost:8080> on the Mac itself. Run `uv run fatball --help` for all options.
 
+**If the app says "camera not found" while the camera is awake:** macOS may be blocking the program from your home network. Run `fatball serve` from the Terminal app and click **Allow** when macOS asks about finding devices on the local network, or turn on the app you run it from under **System Settings → Privacy & Security → Local Network**.
+
+**If the camera's password keeps changing:** iCSee can replace an empty camera password with a hidden random one, after which the app gets "wrong password". While the camera still accepts the saved password (for example straight after "Restore defaults"), give it one you choose:
+
+```sh
+uv run fatball set-camera-password
+```
+
+It changes the camera's password, checks that the new one works, then saves it in the Keychain. iCSee keeps working, because it doesn't use this login.
+
 ## Architecture
 
 ```mermaid

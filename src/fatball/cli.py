@@ -1,4 +1,4 @@
-"""The `fatball` command: serve, setup and demo."""
+"""The `fatball` command: serve, setup, set-camera-password and demo."""
 
 import argparse
 import getpass
@@ -14,20 +14,22 @@ from pathlib import Path
 from fatball import demo, secrets
 from fatball.api import auth as auth_mod
 from fatball.camera import discovery
+from fatball.camera.client import CameraError, CameraUnreachable, WrongPassword, XMClient
 from fatball.config import Settings
 from fatball.ingest.processor import Processor
-from fatball.ingest.watcher import CAMERA_NAME, Watcher
+from fatball.ingest.watcher import CAMERA_NAME, CAMERA_USER, Watcher
 from fatball.library import db, repo
 
 log = logging.getLogger("fatball")
 
 PROCESS_INTERVAL_S = 2.0
 PIN_ATTEMPTS = 3
+MIN_CAMERA_PASSWORD = 6
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fatball", description="Who Ate the Fat Ball? Bird-feeder camera app.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password}")
     serve = sub.add_parser("serve", help="run the camera watcher, the converter and the web app")
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
@@ -36,6 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="address to listen on (default: this Mac only; 0.0.0.0 for the LAN)")
     demo_p.add_argument("--port", type=int, default=8080)
     sub.add_parser("setup", help="set the camera password, the edit PIN and (optionally) the camera IP")
+    sub.add_parser("set-camera-password",
+                   help="give the camera a new password of your choice (so iCSee can't swap an empty one)")
     return parser
 
 
@@ -43,6 +47,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "setup":
         return run_setup(Settings.load())
+    if args.command == "set-camera-password":
+        return run_set_camera_password(Settings.load())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.command == "serve":
         serve(Settings.load(), host=args.host, port=args.port)
@@ -212,4 +218,81 @@ def run_setup(
             return 2
     finally:
         conn.close()
+    return 0
+
+
+# set-camera-password
+def run_set_camera_password(
+    settings: Settings,
+    *,
+    getpass_fn: Callable[[str], str] = getpass.getpass,
+    get_password: Callable[[], str | None] = secrets.get_password,
+    set_password: Callable[[str], None] = secrets.set_password,
+    connect: Callable[..., XMClient] = XMClient,
+) -> int:
+    """Change the camera's own password, check it, then save it in the Keychain. Never echoes secrets.
+
+    The new password is saved only once the camera has logged in with it, so the app and the camera can't
+    end up disagreeing.
+    """
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = db.connect(settings.db_path)
+    try:
+        camera = repo.get_camera(conn)
+    finally:
+        conn.close()
+    if camera is None or not camera.last_ip:
+        print("The camera's IP address isn't known yet: run `fatball setup` (or `fatball serve`) first.")
+        return 1
+    host, port = camera.last_ip, settings.camera_port
+
+    def logs_in(password: str) -> bool:
+        try:
+            with connect(host, port) as client:
+                client.login(CAMERA_USER, password)
+            return True
+        except WrongPassword:
+            return False
+
+    old = get_password() or ""
+    try:
+        if not logs_in(old):
+            print("The camera doesn't accept the saved password, so nothing was changed.")
+            return 1
+    except CameraUnreachable:
+        print(f"Can't reach the camera at {host}. Wake it up (walk past it) and try again.")
+        return 1
+
+    new = getpass_fn("New camera password (typing is hidden): ")
+    if len(new) < MIN_CAMERA_PASSWORD:
+        print(f"Please use at least {MIN_CAMERA_PASSWORD} characters. Nothing was changed.")
+        return 1
+    if getpass_fn("Type it again: ") != new:
+        print("The two didn't match. Nothing was changed.")
+        return 1
+
+    changed = False
+    try:
+        with connect(host, port) as client:
+            client.login(CAMERA_USER, old)
+            client.change_password(CAMERA_USER, old, new)
+        changed = True
+        works = logs_in(new)
+        if not works:
+            print("The camera didn't take the new password; it still uses the old one." if logs_in(old)
+                  else "Unexpected: neither the old nor the new password works. Don't retry yet.")
+            return 1
+    except CameraUnreachable:
+        if changed:  # the camera confirmed the change, so keep the app in step with it
+            set_password(new)
+            print("The camera took the new password and it's saved in the Keychain, but the camera went to "
+                  "sleep before it could be checked.")
+            return 0
+        print("The camera went to sleep before the change. Wake it and run this again; nothing was changed.")
+        return 1
+    except CameraError as e:
+        print(f"The camera didn't take the new password ({e}). Nothing else changed.")
+        return 1
+    set_password(new)
+    print("Done: the camera now uses your new password, and it's saved in the Keychain for the app.")
     return 0

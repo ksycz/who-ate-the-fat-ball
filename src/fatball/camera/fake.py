@@ -14,6 +14,7 @@ from fatball.camera.protocol import (
     FILE_QUERY,
     HEADER,
     LOGIN,
+    MODIFY_PASSWORD,
     PLAY_CLAIM,
     PLAY_DATA,
     PLAY_REQ,
@@ -148,6 +149,15 @@ class FakeCamera:
         self.port = 0
         self._awake = False
 
+    @property
+    def password(self) -> str | None:
+        """The plain password last set by a test; None after a client changed it (only the hash is known)."""
+        return self._password
+
+    @password.setter
+    def password(self, value: str) -> None:
+        self._password, self.password_hash = value, sofia_hash(value)
+
     # lifecycle
     def __enter__(self) -> Self:
         self.awake = True
@@ -229,6 +239,11 @@ class FakeCamera:
         if msg_id == TIME_QUERY:
             return encode(session, seq, msg_id + 1, {"Name": "OPTimeQuery",
                                                      "OPTimeQuery": self.clock.strftime(_TIME_FMT), "Ret": 100})
+        if msg_id == MODIFY_PASSWORD:
+            if payload.get("PassWord") != self.password_hash:
+                return encode(session, seq, msg_id + 1, {"Ret": 203})
+            self._password, self.password_hash = None, payload["NewPassWord"]
+            return encode(session, seq, msg_id + 1, {"Ret": 100})
         if msg_id == TIME_SET:
             when = datetime.strptime(payload["OPTimeSetting"], _TIME_FMT)
             self.set_time_calls.append(when)
@@ -238,7 +253,7 @@ class FakeCamera:
 
     def _login(self, seq: int, payload: dict) -> bytes:
         self.login_attempts += 1
-        if payload.get("PassWord") != sofia_hash(self.password):
+        if payload.get("PassWord") != self.password_hash:
             return encode(0, seq, LOGIN + 1, {"Ret": 205})
         return encode(SESSION_ID, seq, LOGIN + 1, {"Ret": 100, "SessionID": f"0x{SESSION_ID:08X}"})
 

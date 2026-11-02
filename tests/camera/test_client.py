@@ -34,6 +34,25 @@ def test_login_ok_and_system_info(fake_camera):
         assert cam.system_info()["SerialNo"] == "FAKE0000"
 
 
+def test_change_password_then_only_the_new_one_logs_in(fake_camera):
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        cam.change_password("admin", "", "new-secret")
+    with _client(fake_camera) as cam, pytest.raises(WrongPassword):
+        cam.login("admin", "")
+    with _client(fake_camera) as cam:
+        cam.login("admin", "new-secret")
+
+
+def test_change_password_with_a_wrong_old_password_raises(fake_camera):
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        with pytest.raises(WrongPassword):
+            cam.change_password("admin", "not-it", "new-secret")
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")  # unchanged
+
+
 def test_unreachable_raises():
     with pytest.raises(CameraUnreachable), XMClient("127.0.0.1", 1, timeout=0.5) as cam:
         cam.login("admin", "")

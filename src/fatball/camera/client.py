@@ -10,6 +10,7 @@ from fatball.camera.protocol import (
     FILE_QUERY,
     HEADER,
     LOGIN,
+    MODIFY_PASSWORD,
     PLAY_CLAIM,
     PLAY_DATA,
     PLAY_REQ,
@@ -136,6 +137,17 @@ class XMClient:
         if ret != 100:
             raise CameraError(f"login failed (Ret {ret})")
         self._session = int(reply["SessionID"], 16)
+
+    def change_password(self, user: str, old: str, new: str) -> None:
+        """Give `user` a new password (needs a login first). Raises WrongPassword if `old` is wrong."""
+        reply = self._request(MODIFY_PASSWORD, {"EncryptType": "MD5", "NewPassWord": sofia_hash(new),
+                                                "PassWord": sofia_hash(old), "SessionID": self._sid(),
+                                                "UserName": user})
+        ret = reply.get("Ret")
+        if ret in _WRONG_PASSWORD:
+            raise WrongPassword(f"camera refused the old password (Ret {ret})")
+        if ret != 100:
+            raise CameraError(f"password change failed (Ret {ret})")
 
     def system_info(self) -> dict:
         reply = self._request(SYSINFO, {"Name": "SystemInfo", "SessionID": self._sid()})
