@@ -7,11 +7,19 @@ conversion path. The tests use `make_xm_clip` too.
 
 import functools
 import shutil
+import sqlite3
 import struct
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
+import numpy as np
+
 from fatball.camera.fake import FakeCamera, FakeFile
+from fatball.library import repo
+from fatball.recognition.detector import Detection
+from fatball.recognition.fake import FakeDetector
+from fatball.recognition.features import to_blob
 
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 _PARAM_SETS = {32, 33, 34, 35, 39}  # VPS, SPS, PPS, AUD, prefix SEI: start a new access unit
@@ -83,3 +91,30 @@ def build_demo_camera(n_clips: int = 12, days: int = 2, *, now: datetime | None 
 def watcher_options() -> dict:
     """Watcher keyword arguments for the demo: empty password (never the Keychain), no LAN discovery."""
     return {"password": lambda: "", "find": lambda subnet, port, mac: None}
+
+
+DEMO_SPECIES = "Parus major"  # great tit
+_BIRD_FEATURE = np.array([1.0, 0.0], dtype=np.float32)
+_DEMO_BOX = (0.25, 0.25, 0.75, 0.75)
+
+
+def fake_recognition() -> tuple[FakeDetector, Callable]:
+    """A detector that sees one animal in every frame, and a feature function that makes it look like the
+    seeded great tit examples. No model, no Vision: the demo shows bird visits on any machine, instantly."""
+    detector = FakeDetector(lambda index: [Detection("animal", 0.9, _DEMO_BOX)])
+    return detector, lambda path, box: _BIRD_FEATURE
+
+
+def seed_examples(conn: sqlite3.Connection) -> None:
+    """Three labelled great tit examples, kept on a placeholder clip that is never shown (status failed)."""
+    repo.ensure_catalog(conn)
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    when = datetime(2000, 1, 1)
+    holder = repo.add_clip(conn, cam, "/demo/examples", when, when, "h264", 0)
+    repo.set_clip_status(conn, holder, "failed")
+    conn.executemany(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label, label_source) "
+        "VALUES (?, ?, 'animal', 0.9, ?, ?, ?, ?, ?, ?, 'import')",
+        [(holder, i, *_DEMO_BOX, to_blob(_BIRD_FEATURE), DEMO_SPECIES) for i in range(3)],
+    )
+    conn.commit()

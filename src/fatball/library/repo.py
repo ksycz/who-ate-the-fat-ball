@@ -8,12 +8,18 @@ times a RemoteFile carries. Each write commits immediately.
 """
 
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, fields
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
+
+from fatball.recognition.catalog import CATALOG, DOG
+from fatball.recognition.features import from_blob
+from fatball.recognition.matcher import DET_MIN, Example
 
 # downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
 Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
+Category = Literal["birds", "other_animals", "other"]
 _STATUSES = ("downloading", "downloaded", "processing", "ready", "failed")
 _PATH_COLUMNS = frozenset(
     {"original_path", "web_path", "poster_path", "preview_path", "raw_path", "duration_s"}
@@ -224,3 +230,276 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value),
     )
     conn.commit()
+
+
+def ensure_catalog(conn: sqlite3.Connection) -> None:
+    """Make sure every catalog species has a row and an English name. Safe to call any number of times."""
+    for english, scientific, group in CATALOG:
+        conn.execute(
+            'INSERT INTO species(scientific_name, "group") VALUES (?, ?) '
+            'ON CONFLICT(scientific_name) DO UPDATE SET "group" = excluded."group"',
+            (scientific, group),
+        )
+        species_id = conn.execute("SELECT id FROM species WHERE scientific_name = ?", (scientific,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO species_name(species_id, lang, name) VALUES (?, 'en', ?) "
+            "ON CONFLICT(species_id, lang) DO UPDATE SET name = excluded.name",
+            (species_id, english),
+        )
+    conn.commit()
+
+
+def category_for(conn: sqlite3.Connection, scientific_name: str | None) -> Category:
+    """birds for a bird, other for a dog, other_animals for any other mammal, other for everything else."""
+    if scientific_name is None or scientific_name == DOG:
+        return "other"
+    row = conn.execute('SELECT "group" FROM species WHERE scientific_name = ?', (scientific_name,)).fetchone()
+    if row is None:
+        return "other"
+    return "birds" if row["group"] == "bird" else "other_animals"
+
+
+@dataclass(frozen=True)
+class NewDetection:
+    frame_index: int
+    cls: str
+    conf: float
+    box: tuple[float, float, float, float]
+    feature: bytes | None = None
+
+
+def replace_detections(conn: sqlite3.Connection, clip_id: int, rows: Iterable[NewDetection]) -> None:
+    """Swap the clip's unlabelled detections for `rows`, all or nothing. Labelled ones are never deleted, and a
+    row the clip already holds labelled (same frame, class, confidence and box: a retry) is not added again."""
+    with conn:
+        labelled = {
+            _detection_key(r["frame_index"], r["cls"], r["conf"], (r["x1"], r["y1"], r["x2"], r["y2"]))
+            for r in conn.execute(
+                "SELECT frame_index, cls, conf, x1, y1, x2, y2 FROM detection WHERE clip_id = ? AND label IS NOT NULL",
+                (clip_id,),
+            )
+        }
+        conn.execute("DELETE FROM detection WHERE clip_id = ? AND label IS NULL", (clip_id,))
+        conn.executemany(
+            "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(clip_id, r.frame_index, r.cls, r.conf, *r.box, r.feature) for r in rows
+             if _detection_key(r.frame_index, r.cls, r.conf, r.box) not in labelled],
+        )
+
+
+def _detection_key(frame_index: int, cls: str, conf: float, box) -> tuple:
+    return (frame_index, cls, round(conf, 6), *(round(v, 6) for v in box))
+
+
+def examples(conn: sqlite3.Connection) -> list[Example]:
+    """Every labelled detection that has a feature, as matcher examples."""
+    rows = conn.execute(
+        "SELECT label, feature, clip_id FROM detection WHERE label IS NOT NULL AND feature IS NOT NULL ORDER BY id"
+    )
+    return [Example(r["label"], from_blob(r["feature"]), r["clip_id"]) for r in rows]
+
+
+def examples_version(conn: sqlite3.Connection) -> tuple[int, str | None]:
+    """(how many examples, latest label time): changes whenever examples are added, removed or relabelled,
+    so a cached copy of `examples` can tell it is stale without reading the features."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, MAX(labelled_at) AS latest FROM detection WHERE label IS NOT NULL AND feature IS NOT NULL"
+    ).fetchone()
+    return row["n"], row["latest"]
+
+
+def example_count(conn: sqlite3.Connection) -> int:
+    return examples_version(conn)[0]
+
+
+def set_recognition(
+    conn: sqlite3.Connection, clip_id: int, *, best_frame_path: str | None, verdict_json: str, recognized_at: datetime
+) -> None:
+    conn.execute(
+        "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL, "
+        "recognition_wanted = 0 WHERE id = ?",
+        (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
+    )
+    conn.commit()
+
+
+def get_clip(conn: sqlite3.Connection, clip_id: int) -> Clip | None:
+    row = conn.execute("SELECT * FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return _clip(row) if row is not None else None
+
+
+def is_recognized(conn: sqlite3.Connection, clip_id: int) -> bool:
+    row = conn.execute("SELECT recognized_at FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    return row is not None and row["recognized_at"] is not None
+
+
+def scientific_name_for(conn: sqlite3.Connection, name: str) -> str | None:
+    """A catalog species' scientific name from its English name (any case) or its exact scientific name."""
+    row = conn.execute(
+        "SELECT s.scientific_name FROM species s LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+        "WHERE s.scientific_name = ? OR lower(n.name) = lower(?) LIMIT 1",
+        (name, name),
+    ).fetchone()
+    return row["scientific_name"] if row else None
+
+
+def label_detections(conn: sqlite3.Connection, clip_id: int, label: str, source: str) -> int:
+    """Label the clip's confident animal detections that have a feature; returns how many were labelled.
+
+    A detection the owner has corrected (label_source 'correction') is never overwritten."""
+    cur = conn.execute(
+        "UPDATE detection SET label = ?, labelled_at = ?, label_source = ? "
+        "WHERE clip_id = ? AND cls = 'animal' AND conf >= ? AND feature IS NOT NULL "
+        "AND (label_source IS NULL OR label_source != 'correction')",
+        (label, _iso(datetime.now()), source, clip_id, DET_MIN),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def unlabel_detections(conn: sqlite3.Connection, ids: list[int]) -> None:
+    conn.executemany(
+        "UPDATE detection SET label = NULL, labelled_at = NULL, label_source = NULL WHERE id = ?",
+        [(i,) for i in ids],
+    )
+    conn.commit()
+
+
+def visit_for_clip(conn: sqlite3.Connection, clip_id: int) -> int | None:
+    """The id of the visit this clip belongs to, or None."""
+    row = conn.execute("SELECT visit_id FROM visit_clip WHERE clip_id = ?", (clip_id,)).fetchone()
+    return row["visit_id"] if row else None
+
+
+RECOGNIZE_OLD_KEY = "recognize_old_clips"
+_NEEDS_RECOGNITION = "status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL AND recognition_error IS NULL"
+
+
+def recognize_old_clips(conn: sqlite3.Connection) -> bool:
+    """Whether the processor works through older unrecognised clips by itself (the setting, off when absent)."""
+    return get_setting(conn, RECOGNIZE_OLD_KEY) == "on"
+
+
+def clips_needing_recognition(
+    conn: sqlite3.Connection, limit: int, *, wanted_only: bool = False, newest_first: bool = False
+) -> list[Clip]:
+    """Ready videos not yet recognised and not failed at it, oldest first (newest first on request), or only
+    those the owner asked for. Photos have no video, so never."""
+    where = _NEEDS_RECOGNITION + (" AND recognition_wanted = 1" if wanted_only else "")
+    order = "begin_at DESC, id DESC" if newest_first else "begin_at, id"
+    rows = conn.execute(f"SELECT * FROM clip WHERE {where} ORDER BY {order} LIMIT ?", (limit,))
+    return [_clip(r) for r in rows]
+
+
+def count_needing_recognition(conn: sqlite3.Connection) -> int:
+    """How many ready videos are still unrecognised and not failed, whatever the setting."""
+    return conn.execute(f"SELECT COUNT(*) FROM clip WHERE {_NEEDS_RECOGNITION}").fetchone()[0]
+
+
+HEARTBEAT_KEY = "processor_heartbeat"
+HEARTBEAT_FRESH_S = 30
+
+
+def beat(conn: sqlite3.Connection, now: datetime) -> None:
+    """The running app's processor says it is alive (UTC ISO time in the settings)."""
+    set_setting(conn, HEARTBEAT_KEY, now.astimezone(UTC).isoformat())
+
+
+def app_is_running(conn: sqlite3.Connection, now: datetime) -> bool:
+    """True when the processor beat less than HEARTBEAT_FRESH_S ago."""
+    value = get_setting(conn, HEARTBEAT_KEY)
+    if value is None:
+        return False
+    try:
+        age = (now - datetime.fromisoformat(value)).total_seconds()
+    except ValueError:
+        return False
+    return age < HEARTBEAT_FRESH_S
+
+
+def set_recognition_error(conn: sqlite3.Connection, clip_id: int, message: str) -> None:
+    conn.execute("UPDATE clip SET recognition_error = ?, recognition_wanted = 0 WHERE id = ?", (message, clip_id))
+    conn.commit()
+
+
+def recognition_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """pending: ready videos the processor will recognise (the ones asked for, and every older one while the
+    setting is on); old_waiting: older ones that wait until asked for; errors: clips whose recognition failed."""
+    row = conn.execute(
+        f"SELECT COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 1), 0) AS wanted, "
+        f"COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 0), 0) AS old, "
+        "COALESCE(SUM(recognition_error IS NOT NULL), 0) AS errors FROM clip"
+    ).fetchone()
+    if recognize_old_clips(conn):
+        return {"pending": row["wanted"] + row["old"], "old_waiting": 0, "errors": row["errors"]}
+    return {"pending": row["wanted"], "old_waiting": row["old"], "errors": row["errors"]}
+
+
+def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
+    rows = conn.execute(
+        "SELECT c.* FROM clip c JOIN visit_clip vc ON vc.clip_id = c.id WHERE vc.visit_id = ? "
+        "ORDER BY c.begin_at, c.id",
+        (visit_id,),
+    )
+    return [_clip(r) for r in rows]
+
+
+def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
+    """Clear both recognition markers and mark the clip wanted, so the processor recognises it again even with
+    the backfill off; False for an unknown clip."""
+    cur = conn.execute(
+        "UPDATE clip SET recognition_error = NULL, recognized_at = NULL, recognition_wanted = 1 WHERE id = ?",
+        (clip_id,),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+_VISIT_SELECT = (
+    "SELECT v.*, s.scientific_name AS species_scientific, n.name AS species_name, "
+    "(SELECT COUNT(*) FROM visit_clip vc WHERE vc.visit_id = v.id) AS clip_count "
+    "FROM visit v LEFT JOIN species s ON s.id = v.species_id "
+    "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+)
+
+
+def list_visits(
+    conn: sqlite3.Connection,
+    limit: int,
+    *,
+    after: tuple[str, int] | None = None,
+    category: str | None = None,
+    species: str | None = None,
+    day: date | None = None,
+) -> list[sqlite3.Row]:
+    """Visits newest first. `after` is the (started_at, id) of the last visit already seen; `day` is the
+    local date of started_at (stored as local-time ISO text, like clips)."""
+    where, args = [], []
+    if after is not None:
+        where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
+        args += [after[0], after[0], after[1]]
+    if category is not None:
+        where.append("v.category = ?")
+        args.append(category)
+    if species is not None:
+        where.append("s.scientific_name = ?")
+        args.append(species)
+    if day is not None:
+        where.append("substr(v.started_at, 1, 10) = ?")
+        args.append(day.isoformat())
+    clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
+    return conn.execute(f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?", (*args, limit)).fetchall()
+
+
+def get_visit(conn: sqlite3.Connection, visit_id: int) -> sqlite3.Row | None:
+    return conn.execute(f"{_VISIT_SELECT}WHERE v.id = ?", (visit_id,)).fetchone()
+
+
+def visit_guesses(conn: sqlite3.Connection, visit_id: int) -> list[sqlite3.Row]:
+    """The visit's best species guesses in rank order, with English names."""
+    return conn.execute(
+        "SELECT s.scientific_name, n.name, g.confidence FROM guess g JOIN species s ON s.id = g.species_id "
+        "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' WHERE g.visit_id = ? ORDER BY g.rank",
+        (visit_id,),
+    ).fetchall()

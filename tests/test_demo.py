@@ -45,3 +45,19 @@ def test_demo_watcher_never_touches_the_keychain(monkeypatch):
         raise AssertionError("demo read the Keychain")
     monkeypatch.setattr("fatball.secrets.get_password", boom)
     assert demo.watcher_options()["password"]() == ""
+
+
+def test_demo_shows_a_bird_visit(tmp_path, conn):
+    repo.upsert_camera(conn, "feeder", None, "127.0.0.1")
+    demo.seed_examples(conn)
+    detector, features = demo.fake_recognition()
+    with demo.build_demo_camera(n_clips=3, days=1) as cam:
+        settings = Settings(data_dir=tmp_path, camera_port=cam.port)
+        watcher = Watcher(settings, conn, **demo.watcher_options())
+        assert watcher.tick().downloaded == 3
+    Processor(settings, conn, detector_loader=lambda: detector, features=features).process_pending()
+    rows = conn.execute(
+        "SELECT v.category, s.scientific_name FROM visit v JOIN species s ON s.id = v.species_id"
+    ).fetchall()
+    assert len(rows) == 3 and {(r[0], r[1]) for r in rows} == {("birds", demo.DEMO_SPECIES)}
+    assert [c.status for c in repo.clips_with_status(conn, "ready")] == ["ready"] * 3

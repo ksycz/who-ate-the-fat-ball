@@ -32,7 +32,7 @@ The owner has a battery- and solar-powered iCSee outdoor camera pointed at a bir
 **Non-goals (phase 1)**
 - Working away from home (no remote access, no hosting).
 - Phone push notifications. The Mac shows a banner instead.
-- The app learning from corrections. Corrections are stored for a later phase.
+- Retraining a model from corrections. (Since the 2026-11-02 spike, each correction does add a labelled example that the matcher uses straight away; see §6.)
 - Czech or Polish names. English only for now; the data model is ready for other languages.
 - Supporting cameras other than this iCSee/Xiongmai model. The design keeps a clean seam for adding them.
 
@@ -76,7 +76,7 @@ iCSee camera (sleeps; wakes on motion)        Mac (always the same process)
 | Service | Python 3.12 (installed with `uv`), FastAPI + Uvicorn, a background task queue inside the same process |
 | Storage | SQLite (WAL mode) plus a media folder, by default `~/Library/Application Support/WhoAteTheFatBall/` |
 | Media | ffmpeg: converts the camera's H.265 to an H.264 MP4 for web playback, extracts frames, builds thumbnails and 3 s preview loops |
-| Bird recognition | Runs on the Mac, never in the cloud. Step 1 is an animal detector; step 2 is a nature classifier that recognises European birds and common garden mammals. The models are chosen in a spike (§13), and only licences compatible with MIT are allowed. |
+| Bird recognition | Runs on the Mac, never in the cloud. Chosen in the spike (§13, `docs/spikes/2026-11-02-bird-recognition.md`): step 1 is the MegaDetector v6 MIT detector, converted once to Core ML; step 2 gives each animal crop an Apple Vision feature print and matches it to the owner's labelled examples (nearest neighbours). Only licences compatible with MIT are allowed. |
 | Gallery | TypeScript, Svelte + Vite, built to static files. No CSS framework: the design tokens are CSS variables (§9). |
 | Tests | pytest for the service; Playwright for end-to-end tests (Chromium, WebKit, mobile Chrome emulation) |
 
@@ -108,7 +108,8 @@ These are proven facts; the details are in `HANDOFF.md`.
 1. **Convert.** The raw download is unwrapped into an H.265 original and an H.264 web MP4. The service also makes a poster frame, a 3 s muted preview loop (for the "moving previews" on cards), and thumbnails.
 2. **Detect and classify.**
    - Frames are sampled at about 2 fps and run through the detector.
-   - Bird crops go to the species classifier. Each clip gets its top species, the confidence, and the top 3 guesses.
+   - Each animal crop is matched against the owner's labelled examples (birds that visit, the two family dogs, and "nothing" such as leaves or glare). Each clip gets its top species, the confidence, and the top 3 guesses.
+   - The app names only species it has examples of. Anything else is **"Unknown bird"** (or an unknown animal). When the owner names it, the visit's crops become examples, so the next visit is recognised.
    - Category rules:
      - bird → **Birds**
      - squirrel, cat, hedgehog, other wild mammal → **Other animals**
@@ -298,6 +299,7 @@ The prototypes are the reference for layout. This section fixes the behaviour.
 - A downloaded clip appears in the gallery within about 30 s on an Apple-silicon Mac.
 - Videos start within 1 s, streamed by byte range rather than downloaded in full.
 - The service stays light when idle. The watcher's check every 5 s is a single TCP connect.
+- **Memory budget (added 2026-11-02):** the owner's Mac is a MacBook Air with 8 GB. Recognition must stay within a few hundred MB, run at background priority, and handle one clip at a time. Large models (for example BioCLIP 2 at 1.5–2 GB) are ruled out.
 
 ## 12. Errors and edge cases
 
@@ -383,6 +385,7 @@ The owner will also use this project as a **portfolio piece**. That adds these r
   - The Videos tab stays.
   - The banner placement stays as it is.
 - **Behaviour:**
+  - Recognition is detector + Apple Vision feature prints + the owner's examples (spike 2026-11-02). BirdNET is ruled out (non-commercial licence).
   - Any dog goes to Other.
   - Other has an "Only dogs" filter.
   - The "camera OK" dot stays green.

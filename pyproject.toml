@@ -9,6 +9,10 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "keyring",
+    "numpy",
+    "pillow",
+    "pyobjc-framework-CoreML",
+    "pyobjc-framework-Vision",
 ]
 
 [dependency-groups]

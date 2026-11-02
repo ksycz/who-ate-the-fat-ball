@@ -18,10 +18,17 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
 - **A library** (SQLite plus a media folder) of every clip.
 - **A JSON API** on your home network: status, clips and media with range requests. Anyone on the network can view; changing data needs the edit PIN (or a request from the Mac itself).
 - **Demo mode** with a fake camera and generated clips, so you can try it without any hardware.
+- **Bird recognition on your own Mac**:
+  - A detector finds the animals and people in each new clip. Each animal is then matched against examples you labelled yourself.
+  - The species is named only when the match is clear; otherwise the clip is "Unknown bird". Dogs and people go to Other.
+  - Clips less than a minute apart with the same visitor are grouped into a visit.
+  - You can correct a visit through the API, and the correction teaches the matcher straight away. Undo takes it back.
+  - On the owner's 63 hand-labelled clips, it put 59 in the right section and named 13 of 17 clear birds.
+  - It takes about 1 s per clip, under 300 MB of memory, at low priority.
+  - On the real camera, new clips were recognised a median of 13 s after download.
 
 ## What's coming
 
-- **Plan 2: bird recognition.** Spot birds, name the species on your own computer, group clips into visits.
 - **Plan 3: the gallery.** A web app (installable on a phone or iPad) built from the prototypes in the design process.
 
 ## Try the demo
@@ -83,6 +90,40 @@ The camera link is the only code that speaks the Xiongmai protocol, and the libr
 - The edit PIN is stored as a salted hash. Viewing needs no login; changing data needs the PIN or a request from the Mac itself.
 - Real footage and camera identifiers are never committed. Test video is generated with ffmpeg.
 
+## Bird recognition model
+
+The bird spotter runs MegaDetector v6 (MIT, yolov9-c) through Core ML, so the app needs no PyTorch. The model file is about 20 MB and is not committed; build it once in a throwaway environment (any Python 3.12 environment with torch, coremltools and PytorchWildlife works):
+
+```sh
+uv run --python 3.12 --with torch --with coremltools --with PytorchWildlife scripts/export_detector.py "$HOME/Library/Application Support/WhoAteTheFatBall/models"
+```
+
+PytorchWildlife itself is MIT, but it depends on ultralytics and yolov5, which are AGPL, so only this export script uses it. Nothing under `src/` imports any of them. Set `FATBALL_DETECTOR` to the `.mlpackage` path to run the real-model test.
+
+### Turning recognition on: export, import, then serve
+
+Do these in order the first time:
+
+1. **Export the model** with the command above.
+2. **Import labelled examples** from a CSV with the columns `clip_id,label`, where a label is a species (English or scientific name), `dog`, `nothing`, `person` or `skip`:
+
+   ```sh
+   uv run fatball examples-import labels.csv
+   ```
+
+   Clips in the CSV that haven't been recognised yet are recognised first and put into visits. If one of them fails, nothing is labelled and the command tells you which clip it was.
+3. **Serve** with `uv run fatball serve`. New clips are recognised as they arrive; older ones stay plain videos until you ask.
+
+Recognition waits while there are no examples at all. Clips still convert and play, they just stay "pending" (`/api/status` shows `recognition.examples`). Without that wait, every clip would be filed as an unknown bird and never looked at again. Correcting a visit (`PATCH /api/visits/{id}`) also adds examples.
+
+### Older clips: only when you ask
+
+Only new clips are recognised by default; `/api/status` shows `recognition.old_waiting` for the older ones. Recognise some now with `uv run fatball recognize-old --limit 20` (add `--newest-first` to start from the latest; Ctrl-C stops after the current clip), or let the app work through all of them slowly in the background with `uv run fatball recognize-old --background on` (`off` turns it back off). Retrying a clip always recognises it.
+
+### Your library is backed up before an upgrade
+
+Before the app upgrades an existing library to a newer format, it saves a copy next to it, for example `library.sqlite.v1.bak` in `~/Library/Application Support/WhoAteTheFatBall/`. Upgrades can't be undone, so keep that file until you're happy with the new version. An existing backup is never overwritten.
+
 ## Design process
 
 The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques (coming to this repo) informed the gallery. Screenshots will be added with the gallery in Plan 3.
@@ -98,6 +139,7 @@ uv run ruff check
 - `src/fatball/ingest/`: watcher and processor
 - `src/fatball/media/`: demuxing and ffmpeg conversion
 - `src/fatball/library/`: SQLite schema and repository
+- `src/fatball/recognition/`: the Core ML bird detector
 - `src/fatball/api/`: FastAPI app and edit-PIN auth
 - `tests/`: unit and integration tests, using the fake camera
 

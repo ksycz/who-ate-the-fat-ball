@@ -1,0 +1,1 @@
+ALTER TABLE clip ADD COLUMN recognition_wanted INTEGER NOT NULL DEFAULT 0;

@@ -4,9 +4,10 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from fatball.api.app import create_app
 from fatball.library import repo
 
-from .conftest import NOW
+from .conftest import LOCAL, NOW, TestClient
 
 
 def _status(client):
@@ -72,6 +73,18 @@ def test_status_viewable_from_lan_and_reports_queue(lan, conn, cam):
         cid = repo.add_clip(conn, cam, f"/p{i}", datetime(2026, 10, 31, 8, i), datetime(2026, 10, 31, 8, i), "video", 1)
         repo.set_clip_status(conn, cid, st)
     assert _status(lan)["queue"] == {"downloaded": 1, "processing": 1, "failed": 1}
+
+
+def test_status_reports_how_many_examples_recognition_has(local, conn, cam):
+    assert _status(local)["recognition"]["examples"] == 0
+    cid = repo.add_clip(conn, cam, "/e", datetime(2026, 10, 31, 8), datetime(2026, 10, 31, 8), "video", 1)
+    conn.executemany(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label) "
+        "VALUES (?, 0, 'animal', 0.9, 0, 0, 1, 1, ?, ?)",
+        [(cid, b"\x00" * 8, "Parus major"), (cid, b"\x00" * 8, None), (cid, None, "Parus major")],
+    )
+    conn.commit()
+    assert _status(local)["recognition"]["examples"] == 1  # labelled and with a feature
 
 
 def test_status_reports_low_disk(local, monkeypatch, settings):
@@ -247,3 +260,40 @@ def test_clips_kind_is_video_or_photo(local, conn, cam):
         cid = repo.add_clip(conn, cam, f"/k{i}", b, b, kind, 1)
         repo.set_clip_status(conn, cid, "ready")
     assert [c["kind"] for c in local.get("/api/clips").json()] == ["photo", "video"]
+
+
+def test_status_reports_recognition_counts(settings, conn, cam, clock, local):
+    def clip(n, **fields):
+        begin = NOW - timedelta(hours=n)
+        i = repo.add_clip(conn, cam, f"/c{n}", begin, begin, "h264", 1)
+        repo.set_clip_status(conn, i, "ready", web_path=f"clips/{i}/web.mp4")
+        for column, value in fields.items():
+            conn.execute(f"UPDATE clip SET {column} = ? WHERE id = ?", (value, i))
+        conn.commit()
+
+    clip(1)
+    clip(2)
+    clip(3, recognized_at="2026-10-31T10:00:00+00:00")
+    clip(4, recognition_error="boom")
+    assert _status(local)["recognition"] == {
+        "pending": 0, "old_waiting": 2, "errors": 1, "model": False, "examples": 0}
+    loaded = TestClient(create_app(settings, now=clock, model_loaded=lambda: True), client=LOCAL,
+                        base_url="http://localhost")
+    assert _status(loaded)["recognition"]["model"] is True
+
+
+def test_status_counts_old_waiting(local, conn, cam):
+    ids = []
+    for n in range(3):
+        begin = datetime(2026, 10, 31, 8, n)
+        i = repo.add_clip(conn, cam, f"/w{n}", begin, begin, "h264", 1)
+        repo.set_clip_status(conn, i, "ready", web_path=f"clips/{i}/web.mp4")
+        ids.append(i)
+    photo = repo.add_clip(conn, cam, "/photo", datetime(2026, 10, 31, 9), datetime(2026, 10, 31, 9), "jpg", 1)
+    repo.set_clip_status(conn, photo, "ready")  # photos are never recognised
+    repo.requeue_recognition(conn, ids[0])
+    rec = _status(local)["recognition"]
+    assert (rec["pending"], rec["old_waiting"]) == (1, 2)
+    repo.set_setting(conn, "recognize_old_clips", "on")
+    rec = _status(local)["recognition"]
+    assert (rec["pending"], rec["old_waiting"]) == (3, 0)

@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -37,7 +38,7 @@ def _add(conn, cam, path="/idea/a.h265", begin=datetime(2026, 10, 30, 8, 0, 0), 
 def test_connect_creates_all_tables(conn):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert TABLES <= names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
@@ -207,3 +208,59 @@ def test_list_clips_status_filter(conn, cam):
     repo.set_clip_status(conn, a, "ready")
     assert [c.id for c in repo.list_clips(conn, 10, None, status="ready")] == [a]
     assert len(repo.list_clips(conn, 10, None)) == 2
+
+
+def _detection(conn, clip, cls="animal", conf=0.9, feature=b"\x00" * 8, label=None, source=None):
+    return conn.execute(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature, label, label_source) "
+        "VALUES (?, 0, ?, ?, 0, 0, 1, 1, ?, ?, ?)",
+        (clip, cls, conf, feature, label, source),
+    ).lastrowid
+
+
+def _labels(conn, clip):
+    return [(r["label"], r["label_source"]) for r in
+            conn.execute("SELECT label, label_source FROM detection WHERE clip_id = ? ORDER BY id", (clip,))]
+
+
+def test_label_detections_labels_only_confident_animals_with_features(conn, cam):
+    clip = _add(conn, cam)
+    _detection(conn, clip)
+    _detection(conn, clip, cls="person")
+    _detection(conn, clip, conf=0.1)
+    _detection(conn, clip, feature=None)
+    assert repo.label_detections(conn, clip, "Parus major", "import") == 1
+    assert _labels(conn, clip) == [("Parus major", "import"), (None, None), (None, None), (None, None)]
+
+
+def test_label_detections_never_overwrites_a_correction(conn, cam):
+    clip = _add(conn, cam)
+    _detection(conn, clip, label="Passer domesticus", source="correction")
+    _detection(conn, clip)
+    assert repo.label_detections(conn, clip, "Parus major", "import") == 1
+    assert _labels(conn, clip) == [("Passer domesticus", "correction"), ("Parus major", "import")]
+
+
+def test_unlabel_detections_clears_label_time_and_source(conn, cam):
+    clip = _add(conn, cam)
+    d = _detection(conn, clip)
+    repo.label_detections(conn, clip, "Parus major", "import")
+    repo.unlabel_detections(conn, [d])
+    row = conn.execute("SELECT label, labelled_at, label_source FROM detection WHERE id = ?", (d,)).fetchone()
+    assert tuple(row) == (None, None, None)
+
+
+def test_scientific_name_for_english_any_case_or_scientific(conn):
+    repo.ensure_catalog(conn)
+    assert repo.scientific_name_for(conn, "great tit") == "Parus major"
+    assert repo.scientific_name_for(conn, "Parus major") == "Parus major"
+    assert repo.scientific_name_for(conn, "unicorn") is None
+
+
+def test_replace_detections_is_all_or_nothing(conn, cam):
+    clip = _add(conn, cam)
+    repo.replace_detections(conn, clip, [repo.NewDetection(0, "animal", 0.9, (0, 0, 1, 1))])
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.replace_detections(conn, clip, [repo.NewDetection(0, "animal", 0.8, (0, 0, 1, 1)),
+                                             repo.NewDetection(1, None, 0.5, (0, 0, 1, 1))])  # cls is NOT NULL
+    assert [r[0] for r in conn.execute("SELECT conf FROM detection")] == [0.9]
