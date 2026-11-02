@@ -38,7 +38,7 @@ def _add(conn, cam, path="/idea/a.h265", begin=datetime(2026, 10, 30, 8, 0, 0), 
 def test_connect_creates_all_tables(conn):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert TABLES <= names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 

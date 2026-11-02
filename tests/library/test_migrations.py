@@ -14,13 +14,13 @@ def _columns(conn, table):
     return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def test_fresh_database_is_v3(tmp_path):
+def test_fresh_database_is_v4(tmp_path):
     conn = connect(tmp_path / "lib.db")
-    assert SCHEMA_VERSION == 3
-    assert _version(conn) == 3
+    assert SCHEMA_VERSION == 4
+    assert _version(conn) == 4
     assert {"recognized_at", "best_frame_path", "recognition_error", "verdict_json"} <= _columns(conn, "clip")
     assert "recognition_wanted" in _columns(conn, "clip")
-    assert "subject" in _columns(conn, "visit")
+    assert {"subject", "watched_at"} <= _columns(conn, "visit")
     assert {"cls", "feature", "label", "label_source"} <= _columns(conn, "detection")
     assert {"token", "visit_id", "before_json", "created_at"} == _columns(conn, "undo")
     conn.close()
@@ -39,7 +39,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 3
+    assert _version(conn) == 4
     row = conn.execute("SELECT sd_path, recognized_at FROM clip").fetchone()
     assert row["sd_path"] == "/a"
     assert row["recognized_at"] is None
@@ -49,7 +49,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
 def test_migration_is_idempotent(tmp_path):
     connect(tmp_path / "lib.db").close()
     conn = connect(tmp_path / "lib.db")
-    assert _version(conn) == 3
+    assert _version(conn) == 4
     conn.close()
 
 
@@ -107,7 +107,7 @@ def test_a_fresh_library_makes_no_backup(tmp_path):
     assert list(tmp_path.glob("*.bak")) == []
 
 
-def test_v2_database_upgrades_to_v3_and_keeps_clips(tmp_path):
+def test_v2_database_upgrades_to_v4_and_keeps_clips(tmp_path):
     path = tmp_path / "lib.db"
     _v1_library(path)
     raw = sqlite3.connect(path)
@@ -117,7 +117,31 @@ def test_v2_database_upgrades_to_v3_and_keeps_clips(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 3
+    assert _version(conn) == 4
     row = conn.execute("SELECT sd_path, recognition_wanted FROM clip").fetchone()
     assert (row["sd_path"], row["recognition_wanted"]) == ("/a", 0)
     conn.close()
+
+
+def test_v3_library_migrates_to_v4_with_backup(tmp_path):
+    path = tmp_path / "library.sqlite"
+    _v1_library(path)
+    raw = sqlite3.connect(path)
+    for script in sorted(resources.files("fatball.library").joinpath("migrations").iterdir(), key=lambda e: e.name):
+        if script.name[:3] in ("002", "003"):
+            number = int(script.name[:3])
+            raw.executescript(f"BEGIN;\n{script.read_text(encoding='utf-8')}\nPRAGMA user_version = {number};\nCOMMIT;")
+    raw.execute("INSERT INTO visit(started_at, ended_at, category) VALUES ('a', 'b', 'birds')")
+    raw.commit()
+    raw.close()
+
+    conn = connect(path)
+    assert _version(conn) == 4
+    row = conn.execute("SELECT started_at, watched_at FROM visit").fetchone()
+    assert (row["started_at"], row["watched_at"]) == ("a", None)
+    assert conn.execute("SELECT sd_path FROM clip").fetchone()["sd_path"] == "/a"
+    conn.close()
+    backup = sqlite3.connect(tmp_path / "library.sqlite.v3.bak")
+    assert backup.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "watched_at" not in {r[1] for r in backup.execute("PRAGMA table_info(visit)")}
+    backup.close()
