@@ -1,7 +1,8 @@
 """Export MegaDetector v6 (MIT, yolov9-c) to a Core ML package for the app.
 
-Run this once, in its own environment. PytorchWildlife, ultralytics and yolov5 are AGPL, so they are used
-only here, at export time, and never imported by anything under src/. Any Python 3.12 environment with
+Run this once, in its own environment. PytorchWildlife itself is MIT, but it depends on ultralytics and
+yolov5, which are AGPL, so they are all used only here, at export time, and never imported by anything
+under src/. Any Python 3.12 environment with
 torch, coremltools and PytorchWildlife works:
 
     uv run --python 3.12 --with torch --with coremltools --with PytorchWildlife \\

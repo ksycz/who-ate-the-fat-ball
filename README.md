@@ -91,7 +91,27 @@ The bird spotter runs MegaDetector v6 (MIT, yolov9-c) through Core ML, so the ap
 uv run --python 3.12 --with torch --with coremltools --with PytorchWildlife scripts/export_detector.py "$HOME/Library/Application Support/WhoAteTheFatBall/models"
 ```
 
-PytorchWildlife is AGPL, so only this export script uses it. Nothing under `src/` imports it. Set `FATBALL_DETECTOR` to the `.mlpackage` path to run the real-model test.
+PytorchWildlife itself is MIT, but it depends on ultralytics and yolov5, which are AGPL, so only this export script uses it. Nothing under `src/` imports any of them. Set `FATBALL_DETECTOR` to the `.mlpackage` path to run the real-model test.
+
+### Turning recognition on: export, import, then serve
+
+Do these in order the first time:
+
+1. **Export the model** with the command above.
+2. **Import labelled examples** from a CSV with the columns `clip_id,label`, where a label is a species (English or scientific name), `dog`, `nothing`, `person` or `skip`:
+
+   ```sh
+   uv run fatball examples-import labels.csv
+   ```
+
+   Clips in the CSV that haven't been recognised yet are recognised first and put into visits. If one of them fails, nothing is labelled and the command tells you which clip it was.
+3. **Serve** with `uv run fatball serve`. The backfill then works through the older clips one at a time, using your examples.
+
+Recognition waits while there are no examples at all. Clips still convert and play, they just stay "pending" (`/api/status` shows `recognition.examples`). Without that wait, every clip would be filed as an unknown bird and never looked at again. Correcting a visit (`PATCH /api/visits/{id}`) also adds examples.
+
+### Your library is backed up before an upgrade
+
+Before the app upgrades an existing library to a newer format, it saves a copy next to it, for example `library.sqlite.v1.bak` in `~/Library/Application Support/WhoAteTheFatBall/`. Upgrades can't be undone, so keep that file until you're happy with the new version. An existing backup is never overwritten.
 
 ## Design process
 
