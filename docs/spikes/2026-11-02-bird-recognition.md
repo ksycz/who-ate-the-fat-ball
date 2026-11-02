@@ -74,5 +74,6 @@ What it means for the product:
 
 ## Not yet measured
 
-- Detector speed without the PytorchWildlife wrapper. It was 0.14–0.21 s per frame on MPS in this spike.
+- ~~Detector speed without the PytorchWildlife wrapper.~~ Measured with the Core ML export (Task 1, M-series MacBook Air, run at `nice 19`): about 10 ms per 2560×1440 frame once warm (76 ms for the first call), against 0.14–0.21 s per frame on MPS in this spike. The Python process peaked at about 190 MB resident.
+- Core ML export parity, on 9 spike frames from 3 clips. Against PyTorch in eval mode (CPU), the best animal box has the same class, IoU 0.96–1.00 and confidence within 0.08. Against the spike's own numbers it matches on clip 314 (IoU 0.84 and 0.95, confidence within 0.11) but not on clip 22: 0.51 against 0.33, IoU 0.27 on one frame. The cause is that PytorchWildlife leaves the YOLO-MIT model in training mode after loading, so the spike ran BatchNorm with per-image statistics. The Core ML model is the correct eval-mode network, which usually scores weak animals higher. The thresholds in this spike (`DET_MIN` and the rest) were tuned on the training-mode numbers, so Task 10 must re-check them on the Core ML detector.
 - End-to-end time per clip, against the spec's 30-second target.

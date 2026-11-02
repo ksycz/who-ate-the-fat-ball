@@ -83,6 +83,16 @@ The camera link is the only code that speaks the Xiongmai protocol, and the libr
 - The edit PIN is stored as a salted hash. Viewing needs no login; changing data needs the PIN or a request from the Mac itself.
 - Real footage and camera identifiers are never committed. Test video is generated with ffmpeg.
 
+## Bird recognition model
+
+The bird spotter runs MegaDetector v6 (MIT, yolov9-c) through Core ML, so the app needs no PyTorch. The model file is about 20 MB and is not committed; build it once in a throwaway environment (any Python 3.12 environment with torch, coremltools and PytorchWildlife works):
+
+```sh
+uv run --python 3.12 --with torch --with coremltools --with PytorchWildlife scripts/export_detector.py "$HOME/Library/Application Support/WhoAteTheFatBall/models"
+```
+
+PytorchWildlife is AGPL, so only this export script uses it. Nothing under `src/` imports it. Set `FATBALL_DETECTOR` to the `.mlpackage` path to run the real-model test.
+
 ## Design process
 
 The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques (coming to this repo) informed the gallery. Screenshots will be added with the gallery in Plan 3.
@@ -98,6 +108,7 @@ uv run ruff check
 - `src/fatball/ingest/`: watcher and processor
 - `src/fatball/media/`: demuxing and ffmpeg conversion
 - `src/fatball/library/`: SQLite schema and repository
+- `src/fatball/recognition/`: the Core ML bird detector
 - `src/fatball/api/`: FastAPI app and edit-PIN auth
 - `tests/`: unit and integration tests, using the fake camera
 
