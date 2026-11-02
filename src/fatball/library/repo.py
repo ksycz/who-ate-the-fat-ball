@@ -8,11 +8,14 @@ times a RemoteFile carries. Each write commits immediately.
 """
 
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, fields
 from datetime import date, datetime
 from typing import Literal
 
 from fatball.recognition.catalog import CATALOG, DOG
+from fatball.recognition.features import from_blob
+from fatball.recognition.matcher import Example
 
 # downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
 Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
@@ -254,3 +257,42 @@ def category_for(conn: sqlite3.Connection, scientific_name: str | None) -> Categ
     if row is None:
         return "other"
     return "birds" if row["group"] == "bird" else "other_animals"
+
+
+@dataclass(frozen=True)
+class NewDetection:
+    frame_index: int
+    cls: str
+    conf: float
+    box: tuple[float, float, float, float]
+    feature: bytes | None = None
+
+
+def replace_detections(conn: sqlite3.Connection, clip_id: int, rows: Iterable[NewDetection]) -> None:
+    """Swap the clip's unlabelled detections for `rows`; labelled ones are never deleted."""
+    conn.execute("DELETE FROM detection WHERE clip_id = ? AND label IS NULL", (clip_id,))
+    conn.executemany(
+        "INSERT INTO detection(clip_id, frame_index, cls, conf, x1, y1, x2, y2, feature) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [(clip_id, r.frame_index, r.cls, r.conf, *r.box, r.feature) for r in rows],
+    )
+    conn.commit()
+
+
+def examples(conn: sqlite3.Connection) -> list[Example]:
+    """Every labelled detection that has a feature, as matcher examples."""
+    rows = conn.execute(
+        "SELECT label, feature, clip_id FROM detection WHERE label IS NOT NULL AND feature IS NOT NULL ORDER BY id"
+    )
+    return [Example(r["label"], from_blob(r["feature"]), r["clip_id"]) for r in rows]
+
+
+def set_recognition(
+    conn: sqlite3.Connection, clip_id: int, *, best_frame_path: str | None, verdict_json: str, recognized_at: datetime
+) -> None:
+    conn.execute(
+        "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL "
+        "WHERE id = ?",
+        (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
+    )
+    conn.commit()

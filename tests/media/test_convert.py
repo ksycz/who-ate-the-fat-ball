@@ -39,3 +39,16 @@ def test_convert_garbage_raises_conversion_failed(tmp_path):
     raw.write_bytes(b"\x00\x00\x01\xfc" + bytes([0x13, 12, 0, 0]) + bytes(4) + struct.pack("<I", len(body)) + body)
     with pytest.raises(ConversionFailed):
         convert_clip(raw, tmp_path / "out")
+
+
+def test_extract_frames_two_per_second(tmp_path):
+    from PIL import Image
+
+    from fatball.media.convert import FFMPEG, extract_frames
+
+    video = tmp_path / "v.mp4"
+    subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=10",
+                    "-t", "4", "-pix_fmt", "yuv420p", str(video)], check=True)
+    frames = extract_frames(video, tmp_path / "frames")
+    assert len(frames) == 8
+    assert all(Image.open(f).size[0] == 1280 for f in frames)

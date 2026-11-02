@@ -65,3 +65,11 @@ def convert_clip(raw_path: Path, out_dir: Path) -> ConvertedClip:
             str(preview))
     _ffmpeg("-i", str(web), "-frames:v", "1", "-vf", "scale=480:-2", str(thumb))
     return ConvertedClip(original, web, poster, preview, thumb, duration)
+
+
+def extract_frames(video: Path, out_dir: Path, fps: float = 2.0, width: int = 1280) -> list[Path]:
+    """Sample `fps` frames per second as JPEGs `width` px wide into out_dir; returns them in time order."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    _ffmpeg("-i", str(video), "-an", "-vf", f"fps={fps},scale={width}:-2", "-q:v", "3",
+            str(out_dir / "frame_%04d.jpg"))
+    return sorted(out_dir.glob("frame_*.jpg"))
