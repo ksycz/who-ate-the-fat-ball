@@ -104,7 +104,7 @@ def test_setup_stores_ip_password_and_pin_hash(setup_cli, capsys):
     assert saved == ["hunter2"]
     assert repo.get_camera(conn).last_ip == "192.168.1.40"
     stored = repo.get_setting(conn, PIN_KEY)
-    assert stored.startswith("scrypt$") and "1234" not in stored
+    assert stored.startswith("scrypt$") and "1234" not in stored.split("$")  # a random hex hash may contain "1234"
     out = capsys.readouterr().out
     assert "hunter2" not in out and "1234" not in out
 
