@@ -296,3 +296,9 @@ def set_recognition(
         (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
     )
     conn.commit()
+
+
+def visit_for_clip(conn: sqlite3.Connection, clip_id: int) -> int | None:
+    """The id of the visit this clip belongs to, or None."""
+    row = conn.execute("SELECT visit_id FROM visit_clip WHERE clip_id = ?", (clip_id,)).fetchone()
+    return row["visit_id"] if row else None
