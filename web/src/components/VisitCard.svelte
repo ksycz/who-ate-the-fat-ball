@@ -73,4 +73,9 @@
   .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .name { font-size: 17px; font-weight: 600; }
   .time { font-size: 13px; color: var(--ink-2); }
+  @media (min-width: 768px) {
+    .photo { height: 140px; }
+    .name { font-size: 15px; }
+    .time { font-size: 12px; }
+  }
 </style>

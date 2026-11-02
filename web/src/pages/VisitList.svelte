@@ -153,9 +153,11 @@
     {#each groups as group (group.day)}
       <section>
         <h2>{dayHeading(group.day, $serverDay)}</h2>
-        {#each group.visits as visit (visit.id)}
-          <VisitCard {visit} today={$serverDay} />
-        {/each}
+        <div class="cards">
+          {#each group.visits as visit (visit.id)}
+            <VisitCard {visit} today={$serverDay} />
+          {/each}
+        </div>
       </section>
     {/each}
   {/if}
@@ -187,7 +189,9 @@
     font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .more:disabled { opacity: 0.6; cursor: default; }
+  .cards { display: flex; flex-direction: column; gap: 14px; }
   @media (min-width: 768px) {
     .list { padding-top: 0; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
   }
 </style>

@@ -36,6 +36,8 @@
       ? lists[$route.name]
       : null,
   );
+  // Pages of visit cards use the full width on a big screen (a grid of cards, as in the Mac prototype).
+  const roomy = $derived(listKind !== null || $route.name === "today");
   const Page = $derived(listKind ? null : pages[$route.name as keyof typeof pages]);
 
   onMount(() => {
@@ -45,7 +47,7 @@
 
 <div class="shell">
   <NavSide />
-  <main data-route={$route.name}>
+  <main data-route={$route.name} class:roomy>
     {#if listKind}
       {#key listKind}<VisitList kind={listKind} />{/key}
     {:else if Page}
@@ -68,5 +70,6 @@
   }
   @media (min-width: 768px) {
     main { max-width: 760px; padding: 28px 32px 40px; }
+    main.roomy { max-width: 1240px; }
   }
 </style>

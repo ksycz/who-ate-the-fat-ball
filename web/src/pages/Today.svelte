@@ -170,29 +170,33 @@
       </div>
     {/if}
 
-    {#each data.checking as clip (clip.id)}
-      <div class="card">
-        <span class="photo">
-          {#if clip.poster_url}
-            <img src={clip.poster_url} alt="" loading="lazy" />
-          {:else}
-            <span class="placeholder" data-placeholder></span>
-          {/if}
-          <span class="badge">{clipBadge(clip.duration_s, 1)}</span>
-        </span>
-        <span class="info">
-          <span class="who">
-            <span class="name">Checking who it is…</span>
-            <span class="time">{visitTime(clip.begin_at, clip.end_at, data.day)}</span>
+    {#if data.checking.length > 0 || data.visits.length > 0}
+    <div class="cards">
+      {#each data.checking as clip (clip.id)}
+        <div class="card">
+          <span class="photo">
+            {#if clip.poster_url}
+              <img src={clip.poster_url} alt="" loading="lazy" />
+            {:else}
+              <span class="placeholder" data-placeholder></span>
+            {/if}
+            <span class="badge">{clipBadge(clip.duration_s, 1)}</span>
           </span>
-          <Chip text="Checking…" pending />
-        </span>
-      </div>
-    {/each}
+          <span class="info">
+            <span class="who">
+              <span class="name">Checking who it is…</span>
+              <span class="time">{visitTime(clip.begin_at, clip.end_at, data.day)}</span>
+            </span>
+            <Chip text="Checking…" pending />
+          </span>
+        </div>
+      {/each}
 
-    {#each data.visits as visit (visit.id)}
-      <VisitCard {visit} today={data.day} />
-    {/each}
+      {#each data.visits as visit (visit.id)}
+        <VisitCard {visit} today={data.day} />
+      {/each}
+    </div>
+    {/if}
 
     {#if $canEdit && retryable.length > 0}
       <div class="retry">
@@ -250,8 +254,13 @@
     min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line-strong);
     background: #fff; color: var(--robin-dark); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
   }
+  .cards { display: flex; flex-direction: column; gap: 14px; }
   @media (min-width: 768px) {
     .brand { display: none; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .photo { height: 140px; }
+    .name { font-size: 15px; }
+    .time { font-size: 12px; }
   }
   .retry {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
