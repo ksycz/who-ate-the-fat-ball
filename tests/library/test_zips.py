@@ -157,7 +157,7 @@ def test_plan_names_distinct_with_multi_clip_and_same_minute(conn, media, cam):
     repo.set_recognition(conn, cid, best_frame_path=None, verdict_json=verdict_to_json(sure()), recognized_at=t)
     assert assign_visit(conn, repo.get_clip(conn, cid), sure()) == a
     _, b = add_visit(conn, media, cam, t + timedelta(minutes=5))
-    conn.execute("UPDATE visit SET started_at = ? WHERE id = ?", (t.isoformat(), b))
+    conn.execute("UPDATE visit SET started_at = ? WHERE id IN (?, ?)", (t.isoformat(), a, b))
     conn.commit()
     names = [n for n, _ in zips.plan_zip(conn, media, visit_ids=[a, b]).entries]
     assert len(names) == 5 and len({n.lower() for n in names}) == 5
@@ -165,10 +165,10 @@ def test_plan_names_distinct_with_multi_clip_and_same_minute(conn, media, cam):
 
 def test_plan_label_cannot_make_folders(conn, media, cam):
     _, v = add_visit(conn, media, cam, datetime(2026, 11, 2, 9, 0))
-    conn.execute("UPDATE species_name SET name = '../a/b\\c' WHERE species_id = (SELECT id FROM species WHERE scientific_name = ?)", (GREAT,))
+    conn.execute("UPDATE species_name SET name = '..x/a\\c' WHERE species_id = (SELECT id FROM species WHERE scientific_name = ?)", (GREAT,))
     conn.commit()
     for name, _ in zips.plan_zip(conn, media, visit_ids=[v]).entries:
-        assert "/" not in name and "\\" not in name and not name.startswith(".")
+        assert "/" not in name and "\\" not in name and not name[len("2026-11-02 09-00 "):].startswith(".")
 
 
 def test_plan_accepts_exactly_500_visit_ids(conn, media, cam):
