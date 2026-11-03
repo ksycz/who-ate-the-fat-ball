@@ -74,7 +74,7 @@ def checking(conn: sqlite3.Connection, day: date) -> list[Clip]:
     waiting to be recognised (asked for, or older ones while the backfill is on) and not failed at it."""
     waiting = "recognition_wanted = 1 AND " if not repo.recognize_old_clips(conn) else ""
     rows = conn.execute(
-        "SELECT * FROM clip WHERE kind = 'h264' AND substr(begin_at, 1, 10) = ? AND ("
+        "SELECT * FROM clip WHERE deleted_at IS NULL AND kind = 'h264' AND substr(begin_at, 1, 10) = ? AND ("
         "status IN ('downloaded', 'processing') "
         f"OR (status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL AND recognition_error IS NULL "
         f"AND {waiting}id NOT IN (SELECT clip_id FROM visit_clip))) "
@@ -87,7 +87,7 @@ def checking(conn: sqlite3.Connection, day: date) -> list[Clip]:
 def failed(conn: sqlite3.Connection, day: date) -> list[Clip]:
     """The day's videos that could not be converted, or could not be recognised."""
     rows = conn.execute(
-        "SELECT * FROM clip WHERE kind = 'h264' AND substr(begin_at, 1, 10) = ? "
+        "SELECT * FROM clip WHERE deleted_at IS NULL AND kind = 'h264' AND substr(begin_at, 1, 10) = ? "
         "AND (status = 'failed' OR recognition_error IS NOT NULL) ORDER BY begin_at, id",
         (day.isoformat(),),
     )

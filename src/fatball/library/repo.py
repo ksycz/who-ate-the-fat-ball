@@ -153,7 +153,8 @@ def delete_clips_with_status(conn: sqlite3.Connection, status: Status) -> int:
 
 def referenced_raw_paths(conn: sqlite3.Connection) -> set[str]:
     """raw_path of every clip whose download completed (any status but 'downloading')."""
-    rows = conn.execute("SELECT raw_path FROM clip WHERE status != 'downloading' AND raw_path IS NOT NULL")
+    rows = conn.execute("SELECT raw_path FROM clip WHERE status != 'downloading' AND raw_path IS NOT NULL "
+                        "AND deleted_at IS NULL")
     return {r["raw_path"] for r in rows}
 
 
@@ -190,7 +191,7 @@ def set_clip_status(conn: sqlite3.Connection, clip_id: int, status: Status, **pa
 
 
 def clips_with_status(conn: sqlite3.Connection, status: str) -> list[Clip]:
-    rows = conn.execute("SELECT * FROM clip WHERE status = ? ORDER BY begin_at, id", (status,))
+    rows = conn.execute("SELECT * FROM clip WHERE status = ? AND deleted_at IS NULL ORDER BY begin_at, id", (status,))
     return [row_to_clip(r) for r in rows]
 
 
@@ -198,7 +199,7 @@ def list_clips(
     conn: sqlite3.Connection, limit: int, before: datetime | None, *, status: str | None = None
 ) -> list[Clip]:
     """Newest first. `before` is an exclusive cursor on begin_at (pass the last clip's begin_at)."""
-    where, args = [], []
+    where, args = ["deleted_at IS NULL"], []
     if before is not None:
         where.append("begin_at < ?")
         args.append(iso(before))
@@ -213,7 +214,7 @@ def list_clips(
 def queue_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """How many clips are waiting to be (or failed to be) processed."""
     counts = {"downloaded": 0, "processing": 0, "failed": 0}
-    for r in conn.execute("SELECT status, COUNT(*) AS n FROM clip GROUP BY status"):
+    for r in conn.execute("SELECT status, COUNT(*) AS n FROM clip WHERE deleted_at IS NULL GROUP BY status"):
         if r["status"] in counts:
             counts[r["status"]] = r["n"]
     return counts
@@ -373,7 +374,7 @@ def visit_for_clip(conn: sqlite3.Connection, clip_id: int) -> int | None:
 
 
 RECOGNIZE_OLD_KEY = "recognize_old_clips"
-_NEEDS_RECOGNITION = "status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL AND recognition_error IS NULL"
+_NEEDS_RECOGNITION = "deleted_at IS NULL AND status = 'ready' AND web_path IS NOT NULL AND recognized_at IS NULL AND recognition_error IS NULL"
 
 
 def recognize_old_clips(conn: sqlite3.Connection) -> bool:
@@ -429,7 +430,7 @@ def recognition_counts(conn: sqlite3.Connection) -> dict[str, int]:
     row = conn.execute(
         f"SELECT COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 1), 0) AS wanted, "
         f"COALESCE(SUM({_NEEDS_RECOGNITION} AND recognition_wanted = 0), 0) AS old, "
-        "COALESCE(SUM(recognition_error IS NOT NULL), 0) AS errors FROM clip"
+        "COALESCE(SUM(recognition_error IS NOT NULL AND deleted_at IS NULL), 0) AS errors FROM clip"
     ).fetchone()
     if recognize_old_clips(conn):
         return {"pending": row["wanted"] + row["old"], "old_waiting": 0, "errors": row["errors"]}
@@ -482,8 +483,10 @@ def list_visits(
     species: str | None = None,
     day: date | None = None,
     favourite: bool | None = None,
+    only: Literal["dogs", "empty"] | None = None,
 ) -> list[sqlite3.Row]:
     """Visits newest first (`favourite` keeps only starred or only unstarred ones); `limit=None` means all of them.
+    `only` narrows Other to the dog visits or the empty clips.
 
     `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
     (stored as local-time ISO text, like clips)."""
@@ -503,6 +506,11 @@ def list_visits(
     if favourite is not None:
         where.append("v.is_favourite = ?")
         args.append(int(favourite))
+    if only == "dogs":
+        where.append("s.scientific_name = ?")
+        args.append(DOG)
+    elif only == "empty":
+        where.append("v.category = 'other' AND v.subject = 'nothing'")
     clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
     sql = f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?"
     return conn.execute(sql, (*args, -1 if limit is None else limit)).fetchall()  # SQLite: LIMIT -1 is no limit

@@ -22,7 +22,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import corrections, db, repo, today
+from fatball.library import cleanup, corrections, db, repo, today
 
 STATIC_DIR = Path(__file__).parent / "static"
 NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
@@ -62,6 +62,10 @@ class BulkPatch(BaseModel):
     visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
     category: Literal["birds", "other_animals", "other"] | None = None
     is_favourite: bool | None = None
+
+
+class DeleteBody(BaseModel):
+    visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
 
 
 def _local_now() -> datetime:
@@ -240,11 +244,15 @@ def create_app(
         species: str | None = None,
         day: date | None = None,
         favourite: bool | None = None,
+        only: Literal["dogs", "empty"] | None = None,
     ):
-        """Newest first. `day` is the local date of the visit's start (as stored)."""
+        """Newest first. `day` is the local date of the visit's start (as stored). `only` narrows Other."""
+        if only is not None and category != "other":
+            raise HTTPException(status_code=422, detail="only goes with category=other")
         after = _decode_cursor(cursor) if cursor else None
         rows = repo.list_visits(
             conn, limit + 1, after=after, category=category, species=species, day=day, favourite=favourite,
+            only=only,
         )
         page = rows[:limit]
         return {
@@ -285,6 +293,17 @@ def create_app(
         except corrections.InvalidChange as e:
             raise HTTPException(status_code=422, detail=str(e)) from None
         return {"undo_token": token, "changed": changed}
+
+    @app.post("/api/visits/delete", dependencies=[Depends(auth_mod.require_editor)])
+    def delete_visits(body: DeleteBody, conn: Conn):
+        """Delete empty clips for good (their files too; the camera's copy is not fetched again)."""
+        try:
+            n = cleanup.delete_empty_visits(conn, settings.media_dir, body.visit_ids, now().astimezone())
+        except cleanup.VisitNotFound:
+            raise HTTPException(status_code=404) from None
+        except cleanup.NotEmpty:
+            raise HTTPException(status_code=409, detail="Only empty clips can be deleted") from None
+        return {"deleted": n}
 
     @app.patch("/api/visits/{visit_id}", dependencies=[Depends(auth_mod.require_editor)])
     def patch_visit(visit_id: int, body: VisitPatch, conn: Conn):
