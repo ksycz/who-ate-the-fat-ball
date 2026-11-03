@@ -39,7 +39,7 @@ test("Back from a visit keeps your place in Birds", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 700 });
   await page.goto("/birds");
   await expect(page.getByRole("link", { name: /Nuthatch/ })).toBeVisible();
-  await page.mouse.wheel(0, 900);
+  await page.evaluate(() => window.scrollBy(0, 900)); // mobile WebKit has no mouse wheel
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(500);
   const before = await page.evaluate(() => window.scrollY);
   const cards = page.locator("main a.card");

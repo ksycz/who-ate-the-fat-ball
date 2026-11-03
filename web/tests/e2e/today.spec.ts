@@ -26,7 +26,7 @@ test("a quiet day says so and points to yesterday", async ({ page }) => {
   await expect(page.getByText("Quiet so far")).toBeVisible();
   await expect(page.getByText(/No visitors yet today\. Last visitor: Blue tit, yesterday 17:40/)).toBeVisible();
   await expect(page.getByText("The camera was last seen at 09:58.")).toBeVisible();
-  await expect(page.getByText("Camera seen 2 min ago").first()).toBeVisible();
+  await expect(page.getByText("Camera seen 2 min ago").filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: /See yesterday.s visits/ })).toBeVisible();
 });
 
