@@ -59,6 +59,9 @@
 
   <SortedInto sorted={status?.sorted} current={name} />
 
+  <a class="item" href="/stats" use:link aria-current={name === "stats" ? "page" : undefined} class:on={name === "stats"}>
+    <Icon name="Stats" size={20} /><span class="label">Stats</span>
+  </a>
   <a class="item" href="/status" use:link aria-current={name === "status" ? "page" : undefined} class:on={name === "status"}>
     <Icon name="Camera" size={20} />
     <span class="label">App status</span>

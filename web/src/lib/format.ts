@@ -186,3 +186,12 @@ export function sizeText(bytes: number): string {
   if (Number(mb) < 1000) return `${mb} MB`;
   return `${(bytes / 1e9).toFixed(1)} GB`;
 }
+
+// 0 for no visits, else 1-4 by share of the busiest cell.
+export function heatLevel(n: number, max: number): 0 | 1 | 2 | 3 | 4 {
+  if (n <= 0 || max <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil((4 * n) / max))) as 1 | 2 | 3 | 4;
+}
+
+// "Tue 8–10 am · 12 visits", from the server's day and slot labels.
+export const cellText = (day: string, slot: string, n: number): string => `${day} ${slot} · ${plural(n, "visit")}`;

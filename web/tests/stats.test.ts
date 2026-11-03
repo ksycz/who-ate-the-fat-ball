@@ -69,7 +69,7 @@ describe("Stats page", () => {
     expect(screen.getByText("Last 4 weeks")).toBeTruthy();
     expect(screen.getByText("8–10 am", { selector: ".value" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Tap a square to see the number of visits");
-    expect(screen.getByText("great tit")).toBeTruthy();
+    expect(screen.getByText("Great tit")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /visits?$/ })).toHaveLength(49);
   });
 

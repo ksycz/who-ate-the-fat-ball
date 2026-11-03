@@ -9,6 +9,7 @@
   import VisitList from "./pages/VisitList.svelte";
   import Today from "./pages/Today.svelte";
   import Videos from "./pages/Videos.svelte";
+  import Stats from "./pages/Stats.svelte";
   import Visit from "./pages/Visit.svelte";
   import More from "./pages/More.svelte";
   import AppStatus from "./pages/AppStatus.svelte";
@@ -19,6 +20,7 @@
   const pages = {
     today: Today,
     videos: Videos,
+    stats: Stats,
     visit: Visit,
     "birds-species": Species,
     more: More,
@@ -42,7 +44,7 @@
   );
   // Pages of visit cards use the full width on a big screen (a grid of cards, as in the Mac prototype).
   const roomy = $derived(
-    listKind !== null || $route.name === "today" || $route.name === "videos" || $route.name === "birds-species" || $route.name === "species",
+    listKind !== null || $route.name === "today" || $route.name === "videos" || $route.name === "stats" || $route.name === "birds-species" || $route.name === "species",
   );
   const Page = $derived(listKind || $route.name === "species" ? null : pages[$route.name as keyof typeof pages]);
 

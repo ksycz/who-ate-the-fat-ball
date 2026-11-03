@@ -138,3 +138,13 @@ export interface Status {
   recognition: { pending: number; old_waiting: number; errors: number; model: boolean; examples: number };
   disk: { free_bytes: number; low: boolean };
 }
+
+export interface StatsSummary {
+  weeks: number;
+  visits: number;
+  species: number;
+  busiest: string | null;
+  slots: string[];
+  heatmap: { day: string; cells: number[] }[];
+  per_species: { scientific: string; name: string | null; visits: number }[];
+}

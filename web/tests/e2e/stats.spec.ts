@@ -28,7 +28,6 @@ test("tapping the busiest heatmap cell shows its value", async ({ page, request 
 });
 
 test("the phone bar has five tabs and the heatmap fits 390 px", async ({ page }) => {
-  test.skip(!isPhone(page) && page.viewportSize() !== null, "sets its own viewport below");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/stats");
   const nav = page.getByRole("navigation", { name: "Main" }).filter({ visible: true });

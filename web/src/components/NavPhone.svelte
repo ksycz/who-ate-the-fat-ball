@@ -7,6 +7,7 @@
     { label: "Today", href: "/", icon: "Today", names: ["today"] },
     { label: "Videos", href: "/videos", icon: "Videos", names: ["videos"] },
     { label: "Birds", href: "/birds", icon: "Birds", names: ["birds", "birds-species", "species", "other-animals", "other"] },
+    { label: "Stats", href: "/stats", icon: "Stats", names: ["stats"] },
     { label: "More", href: "/more", icon: "More", names: ["more", "favourites", "status", "unlock", "setup"] },
   ] as const;
 </script>
@@ -31,7 +32,7 @@
     height: calc(var(--nav-phone-h) - 14px);
     z-index: 5;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 2px;
     padding: 8px 6px;
     border-radius: 24px;
