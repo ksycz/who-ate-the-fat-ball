@@ -46,6 +46,17 @@ export interface SpeciesRef {
   name: string | null;
 }
 
+// One row of GET /api/species?period=: the counts are for the period, the dates are all-time.
+export interface SpeciesSummary {
+  scientific: string;
+  name: string | null;
+  visits: number;
+  last_seen_at: string;
+  first_seen_at: string | null;
+  is_new: boolean;
+  photo_url: string | null;
+}
+
 export interface Visit {
   id: number;
   started_at: string;

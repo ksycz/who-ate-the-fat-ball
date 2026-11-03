@@ -38,7 +38,8 @@
     };
   });
 
-  const name = $derived($route.name);
+  // The By species pages belong to Birds.
+  const name = $derived($route.name === "birds-species" || $route.name === "species" ? "birds" : $route.name);
 </script>
 
 <nav aria-label="Main">

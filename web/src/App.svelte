@@ -5,6 +5,7 @@
   import NavPhone from "./components/NavPhone.svelte";
   import Toast from "./components/Toast.svelte";
   import NavSide from "./components/NavSide.svelte";
+  import Species from "./pages/Species.svelte";
   import VisitList from "./pages/VisitList.svelte";
   import Today from "./pages/Today.svelte";
   import Visit from "./pages/Visit.svelte";
@@ -17,6 +18,7 @@
   const pages = {
     today: Today,
     visit: Visit,
+    "birds-species": Species,
     more: More,
     status: AppStatus,
     unlock: Unlock,
@@ -37,8 +39,10 @@
       : null,
   );
   // Pages of visit cards use the full width on a big screen (a grid of cards, as in the Mac prototype).
-  const roomy = $derived(listKind !== null || $route.name === "today");
-  const Page = $derived(listKind ? null : pages[$route.name as keyof typeof pages]);
+  const roomy = $derived(
+    listKind !== null || $route.name === "today" || $route.name === "birds-species" || $route.name === "species",
+  );
+  const Page = $derived(listKind || $route.name === "species" ? null : pages[$route.name as keyof typeof pages]);
 
   onMount(() => {
     loadSession();
@@ -48,7 +52,9 @@
 <div class="shell">
   <NavSide />
   <main data-route={$route.name} class:roomy>
-    {#if listKind}
+    {#if $route.name === "species"}
+      {#key $route.params.scientific}<VisitList kind="birds" species={$route.params.scientific} />{/key}
+    {:else if listKind}
       {#key listKind}<VisitList kind={listKind} />{/key}
     {:else if Page}
       <Page />

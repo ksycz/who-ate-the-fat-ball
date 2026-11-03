@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { ApiError, getJSON, type Category, type Today, type Visit } from "../lib/api";
-  import { dayHeading, dayOf, visitName } from "../lib/format";
+  import { dayHeading, dayOf, speciesLabel, visitName } from "../lib/format";
   import { deleteEmptyClips, moveVisits, selection } from "../lib/select";
   import { changes, noteServerDay, serverDay, showToast } from "../lib/session";
   import { askZip, type ZipPlan, type ZipRequest } from "../lib/zip";
   import { loadList, loadOtherFilter, saveList, saveOtherFilter } from "../lib/listCache";
-  import { arrival } from "../lib/router";
+  import { arrival, back } from "../lib/router";
+  import BirdsSwitch from "../components/BirdsSwitch.svelte";
   import DeleteConfirm from "../components/DeleteConfirm.svelte";
   import FilterChips from "../components/FilterChips.svelte";
   import NewSpeciesBanner from "../components/NewSpeciesBanner.svelte";
@@ -15,7 +16,8 @@
   import ZipConfirm from "../components/ZipConfirm.svelte";
 
   type Kind = "birds" | "other_animals" | "other" | "favourites";
-  let { kind }: { kind: Kind } = $props();
+  // species: a scientific name, to list only that species' visits (kind is birds).
+  let { kind, species = null }: { kind: Kind; species?: string | null } = $props();
 
   type Filter = "all" | "dogs" | "empty";
   const FILTER_LABELS: Record<Filter, string> = { all: "All", dogs: "Only dogs", empty: "Empty clips" };
@@ -54,7 +56,9 @@
   let generation = 0; // bumped on every reload so a slow older response is dropped
 
   // Remembered lists are kept per filter: "other:empty".
-  const cacheKey = () => (kind === "other" && filter !== "all" ? `other:${filter}` : kind);
+  const cacheKey = () =>
+    species !== null ? `species:${species}` : kind === "other" && filter !== "all" ? `other:${filter}` : kind;
+  const title = $derived(species !== null ? (visits[0]?.species ? speciesLabel(visits[0].species) : species) : TITLES[kind]);
 
   function chooseFilter(label: string) {
     const next = (Object.keys(FILTER_LABELS) as Filter[]).find((f) => FILTER_LABELS[f] === label);
@@ -69,6 +73,7 @@
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (kind === "favourites") q.set("favourite", "true");
     else q.set("category", kind);
+    if (species !== null) q.set("species", species);
     if (kind === "other" && filter !== "all") q.set("only", filter);
     if (after !== null) q.set("cursor", after);
     return `/api/visits?${q}`;
@@ -177,7 +182,7 @@
     if ($serverDay === null) {
       getJSON<{ day: string }>("/api/status").then((s) => noteServerDay(s.day)).catch(() => {});
     }
-    if (kind === "birds") {
+    if (kind === "birds" && species === null) {
       getJSON<Today>("/api/today")
         .then((t) => {
           newSpecies = t.new_species;
@@ -211,8 +216,13 @@
 </script>
 
 <div class="list" class:selecting={$selection.on}>
+  {#if species !== null}
+    <button type="button" class="back" aria-label="Back" onclick={() => back("/birds/species")}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
+    </button>
+  {/if}
   <div class="head">
-    <h1>{TITLES[kind]}</h1>
+    <h1>{title}</h1>
     {#if loaded && visits.length > 0}
       <div class="tools">
         {#if $selection.on}
@@ -227,6 +237,10 @@
       </div>
     {/if}
   </div>
+
+  {#if kind === "birds" && species === null}
+    <BirdsSwitch view="all" />
+  {/if}
 
   {#if kind === "other"}
     <FilterChips options={FILTER_OPTIONS} value={FILTER_LABELS[filter]} onchange={chooseFilter} />
@@ -244,12 +258,12 @@
     />
   {/if}
 
-  {#if kind === "birds" && newSpecies}
+  {#if kind === "birds" && species === null && newSpecies}
     <NewSpeciesBanner species={newSpecies} placement="birds" />
   {/if}
 
   {#if loaded && visits.length === 0}
-    <p class="empty">{kind === "other" ? FILTER_EMPTY[filter] : EMPTY[kind]}</p>
+    <p class="empty">{species !== null ? "No visits for this species" : kind === "other" ? FILTER_EMPTY[filter] : EMPTY[kind]}</p>
   {/if}
 
   <!-- Without the Mac's day (the status request failed) the headings and times fall back to plain dates. -->
@@ -257,9 +271,11 @@
     <section>
       <div class="day">
         <h2>{dayHeading(group.day, $serverDay ?? "")}</h2>
-        <button type="button" class="day-zip" disabled={working} onclick={() => zipDay(group.day)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Download this day (.zip)
-        </button>
+        {#if species === null}
+          <button type="button" class="day-zip" disabled={working} onclick={() => zipDay(group.day)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Download this day (.zip)
+          </button>
+        {/if}
       </div>
       <div class="cards">
         {#each group.visits as visit (visit.id)}
@@ -299,6 +315,10 @@
 <style>
   .list { display: flex; flex-direction: column; gap: 14px; padding: 18px 0 20px; }
   .list.selecting { padding-bottom: 150px; } /* room for the bar over the last card */
+  .back {
+    display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%;
+    border: none; background: #fff; color: var(--ink); cursor: pointer;
+  }
   .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h1 { margin: 0; font-weight: 800; font-size: 34px; letter-spacing: -0.8px; }
   .tools { display: flex; gap: 8px; }

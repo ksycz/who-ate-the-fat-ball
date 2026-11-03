@@ -4,6 +4,8 @@ export type RouteName =
   | "today"
   | "visit"
   | "birds"
+  | "birds-species"
+  | "species"
   | "other-animals"
   | "other"
   | "favourites"
@@ -21,6 +23,7 @@ export interface Route {
 const FIXED: Record<string, RouteName> = {
   "/": "today",
   "/birds": "birds",
+  "/birds/species": "birds-species",
   "/other-animals": "other-animals",
   "/other": "other",
   "/favourites": "favourites",
@@ -36,6 +39,14 @@ export function matchRoute(path: string): Route {
   if (fixed) return { name: fixed, params: {} };
   const visit = /^\/visit\/(\d+)$/.exec(clean);
   if (visit) return { name: "visit", params: { id: visit[1] } };
+  const species = /^\/birds\/species\/([^/]+)$/.exec(clean);
+  if (species) {
+    try {
+      return { name: "species", params: { scientific: decodeURIComponent(species[1]) } };
+    } catch {
+      return { name: "notfound", params: {} }; // a malformed %-escape
+    }
+  }
   return { name: "notfound", params: {} };
 }
 

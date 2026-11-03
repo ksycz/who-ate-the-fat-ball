@@ -5,7 +5,7 @@
 
   const items = [
     { label: "Today", href: "/", icon: "Today", names: ["today"] },
-    { label: "Birds", href: "/birds", icon: "Birds", names: ["birds", "other-animals", "other"] },
+    { label: "Birds", href: "/birds", icon: "Birds", names: ["birds", "birds-species", "species", "other-animals", "other"] },
     { label: "More", href: "/more", icon: "More", names: ["more", "favourites", "status", "unlock", "setup"] },
   ] as const;
 </script>

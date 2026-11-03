@@ -1,6 +1,10 @@
 import { writable } from "svelte/store";
 import { ApiError, getJSON } from "./api";
 
+// The period on Birds › By species; it survives opening a species and coming back.
+export type Period = "week" | "month" | "all";
+export const period = writable<Period>("week");
+
 export const canEdit = writable(false);
 
 // The Mac's local date as the server sees it ("YYYY-MM-DD"); null until first known.
