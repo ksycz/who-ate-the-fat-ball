@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
 
@@ -54,6 +54,12 @@ class VisitPatch(BaseModel):
     """`species` present as null means 'no species'; absent means unchanged."""
 
     species: str | None = None
+    category: Literal["birds", "other_animals", "other"] | None = None
+    is_favourite: bool | None = None
+
+
+class BulkPatch(BaseModel):
+    visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
     category: Literal["birds", "other_animals", "other"] | None = None
     is_favourite: bool | None = None
 
@@ -265,6 +271,20 @@ def create_app(
         """Watching is viewing, so no PIN: it only clears the new-species banner."""
         if not today.mark_watched(conn, visit_id, now().astimezone()):
             raise HTTPException(status_code=404)
+
+    @app.post("/api/visits/bulk", dependencies=[Depends(auth_mod.require_editor)])
+    def bulk_visits(body: BulkPatch, conn: Conn):
+        """Move and/or favourite several visits; one undo token covers them all. A plain move teaches nothing."""
+        if body.category is None and body.is_favourite is None:
+            raise HTTPException(status_code=422, detail="give a category or is_favourite")
+        change = corrections.Change(category=body.category, is_favourite=body.is_favourite, teach=False)
+        try:
+            token, changed = corrections.apply_many(conn, body.visit_ids, change, now().astimezone())
+        except corrections.VisitNotFound:
+            raise HTTPException(status_code=404) from None
+        except corrections.InvalidChange as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+        return {"undo_token": token, "changed": changed}
 
     @app.patch("/api/visits/{visit_id}", dependencies=[Depends(auth_mod.require_editor)])
     def patch_visit(visit_id: int, body: VisitPatch, conn: Conn):
