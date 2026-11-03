@@ -19,6 +19,9 @@
   const detail = $derived(focusedText ?? pickedText);
   const max = $derived(Math.max(0, ...heatmap.flatMap((r) => r.cells)));
   let grid: HTMLElement | undefined = $state();
+  // Roving tabindex: one tab stop in the grid, on the cell last moved to, else the tapped one, else the first.
+  let current = $state<string | null>(null);
+  const stop = $derived(current ?? picked ?? "0-0");
 
   function pick(key: string, text: string) {
     picked = picked === key ? null : key;
@@ -35,13 +38,14 @@
     const nc = c + step[1];
     if (nr < 0 || nc < 0 || nr >= heatmap.length || nc >= slots.length) return;
     e.preventDefault();
+    current = `${nr}-${nc}`;
     grid?.querySelector<HTMLElement>(`[data-cell="${nr}-${nc}"]`)?.focus();
   }
 </script>
 
 <div class="grid" role="grid" aria-label="Visits by day and time of day" bind:this={grid}>
   <div class="row" role="row">
-    <span></span>
+    <span role="columnheader" aria-hidden="true"></span>
     {#each slots as slot, i (slot)}
       <span class="head" role="columnheader" aria-label={slot}>{SHORT[i] ?? slot}</span>
     {/each}
@@ -57,12 +61,16 @@
           <button
             type="button"
             data-cell={key}
+            tabindex={stop === key ? 0 : -1}
             aria-label={text}
             aria-pressed={picked === key}
             class:on={picked === key}
             style="background: {colour.bg}; border-color: {colour.border}"
             onclick={() => pick(key, text)}
-            onfocus={() => (focusedText = text)}
+            onfocus={() => {
+              focusedText = text;
+              current = key;
+            }}
             onblur={() => (focusedText = null)}
             onkeydown={(e) => keydown(e, r, c)}
           ></button>

@@ -100,6 +100,32 @@ describe("Stats page", () => {
     expect(screen.getByRole("status").textContent).toBe("Wed 10 am–12 pm · 1 visit");
   });
 
+  it("is one tab stop, and the arrow keys move inside it", async () => {
+    serve(stats());
+    render(Stats);
+    const first = await screen.findByRole("button", { name: "Mon 6–8 am · 0 visits" });
+    const buttons = screen.getAllByRole("button", { name: /visits?$/ });
+    expect(buttons.filter((b) => b.tabIndex === 0)).toEqual([first]);
+    first.focus();
+    await fireEvent.keyDown(first, { key: "ArrowRight" });
+    const next = screen.getByRole("button", { name: "Mon 8–10 am · 0 visits" });
+    expect(document.activeElement).toBe(next);
+    expect(next.tabIndex).toBe(0);
+    expect(first.tabIndex).toBe(-1);
+  });
+
+  it("goes back to the tapped square's text after focus moves away", async () => {
+    serve(stats());
+    render(Stats);
+    const a = await screen.findByRole("button", { name: "Tue 8–10 am · 12 visits" });
+    const b = screen.getByRole("button", { name: "Wed 10 am–12 pm · 1 visit" });
+    await fireEvent.click(a);
+    await fireEvent.focus(b);
+    expect(screen.getByRole("status").textContent).toBe("Wed 10 am–12 pm · 1 visit");
+    await fireEvent.blur(b);
+    expect(screen.getByRole("status").textContent).toBe("Tue 8–10 am · 12 visits");
+  });
+
   it("offers Try again when the first load fails", async () => {
     serve({}, false);
     render(Stats);
