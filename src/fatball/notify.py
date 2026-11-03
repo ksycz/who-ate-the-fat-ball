@@ -53,7 +53,10 @@ def notifier_loop(conn, stop: threading.Event, now: Callable[[], datetime], send
             if rows:
                 if (repo.get_setting(conn, SETTING) or "on") == "on":
                     for message in messages(rows):
-                        send(TITLE, message)
+                        try:
+                            send(TITLE, message)
+                        except Exception:  # one lost banner must not make the others repeat every pass
+                            log.exception("banner failed; carrying on")
                 repo.mark_notified(conn, [r["id"] for r in rows], current)
         except Exception:
             log.exception("notification pass failed; retrying")

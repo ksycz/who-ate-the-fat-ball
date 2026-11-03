@@ -138,7 +138,8 @@ def test_serve_fills_the_species_catalog_so_a_first_correction_works(tmp_path, m
 
     monkeypatch.setattr(uvicorn.Server, "run", stop_at_once)
     settings = Settings(data_dir=tmp_path / "data")  # a fresh install: nothing pre-fills the catalog
-    cli.serve(settings, host="127.0.0.1", port=_free_port(), detector_loader=lambda: None)
+    cli.serve(settings, host="127.0.0.1", port=_free_port(), detector_loader=lambda: None,
+              notifications=False)
     conn = connect(settings.db_path)
     try:
         cam = repo.upsert_camera(conn, "feeder", None, None)

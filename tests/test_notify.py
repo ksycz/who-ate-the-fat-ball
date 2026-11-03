@@ -99,6 +99,7 @@ def test_loop_survives_a_failing_send(conn):
         raise RuntimeError("no")
 
     run_one_pass(conn, START + timedelta(minutes=5), boom)  # must not raise
+    assert conn.execute("SELECT COUNT(*) FROM visit WHERE notified_at IS NULL").fetchone()[0] == 0
 
 
 def test_send_banner_passes_text_as_arguments(monkeypatch):
