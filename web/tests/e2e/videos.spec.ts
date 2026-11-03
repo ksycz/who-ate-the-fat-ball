@@ -56,3 +56,15 @@ test("a chip narrows the feed and a swipe or Previous goes back", async ({ page 
     await expect(page.getByText(/^2 of \d+$/)).toBeVisible();
   }
 });
+
+test("the video controls are not covered by the overlays", async ({ page }) => {
+  await openVideos(page);
+  await expect(page.locator("video")).toBeVisible();
+  const covered = await page.evaluate(() => {
+    const v = document.querySelector("video") as HTMLVideoElement;
+    const r = v.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.bottom - 10);
+    return hit === v ? null : (hit?.outerHTML.slice(0, 80) ?? "nothing");
+  });
+  expect(covered).toBeNull();
+});

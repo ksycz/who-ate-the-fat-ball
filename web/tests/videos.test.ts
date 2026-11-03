@@ -230,7 +230,7 @@ describe("Videos", () => {
     const fav = screen.getByRole("button", { name: "Favourite" });
     expect(fav.getAttribute("aria-pressed")).toBe("false");
     await fireEvent.click(fav);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Saved" }).getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Favourite" }).getAttribute("aria-pressed")).toBe("true"));
     expect(calls).toEqual(['/api/visits/1 {"is_favourite":true}']);
   });
 
@@ -248,5 +248,81 @@ describe("Videos", () => {
     serve(three());
     await fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByText("1 of 3");
+  });
+
+  it("a_chip_change_during_a_load_more_wins_and_the_old_response_is_ignored", async () => {
+    serve(three({ total: 5, next_cursor: "c2" }), {
+      "|Cyanistes caeruleus": { items: [item(9), item(10)], next_cursor: null, total: 2, filters: FILTERS },
+    });
+    let release: () => void = () => {};
+    const slow = new Promise<void>((r) => (release = r));
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes("cursor=c2")) {
+        await slow;
+        return new Response(JSON.stringify({ items: [item(4), item(5)], next_cursor: null, total: 5, filters: FILTERS }), { status: 200 });
+      }
+      return base(url);
+    });
+    render(Videos);
+    await screen.findByText("1 of 3");
+    const next = screen.getByRole("button", { name: "Next clip" }) as HTMLButtonElement;
+    await fireEvent.click(next);
+    await fireEvent.click(next);
+    await fireEvent.click(next); // load-more now in flight
+    await fireEvent.click(screen.getByRole("button", { name: "Blue tit" }));
+    await screen.findByText("1 of 2");
+    release();
+    await tick();
+    await tick();
+    expect(position()).toBe("1 of 2");
+    expect(video().getAttribute("src")).toBe("/media/web/9.mp4");
+    expect(next.disabled).toBe(false);
+    await fireEvent.click(next);
+    expect(position()).toBe("2 of 2");
+  });
+
+  it("a_rapid_double_next_at_the_last_loaded_item_fetches_the_cursor_once", async () => {
+    serve(three({ total: 5, next_cursor: "c2" }), {
+      "c2|": { items: [item(4), item(5)], next_cursor: null, total: 5, filters: FILTERS },
+    });
+    render(Videos);
+    await screen.findByText("1 of 5");
+    const next = screen.getByRole("button", { name: "Next clip" }) as HTMLButtonElement;
+    await fireEvent.click(next);
+    await fireEvent.click(next);
+    next.click();
+    next.click();
+    await waitFor(() => expect(position()).toBe("4 of 5"));
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("cursor=c2"))).toHaveLength(1);
+  });
+
+  it("arrow_keys_leave_the_video_alone_so_native_seek_works", async () => {
+    serve(three());
+    render(Videos);
+    await screen.findByText("1 of 3");
+    await fireEvent.keyDown(video(), { key: "ArrowRight" });
+    expect(position()).toBe("1 of 3");
+  });
+
+  it("keeps_the_header_and_chips_when_a_chip_refetch_fails", async () => {
+    serve(three());
+    render(Videos);
+    await screen.findByText("1 of 3");
+    fetchMock.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    await fireEvent.click(screen.getByRole("button", { name: "Blue tit" }));
+    await screen.findByText(/Couldn.t load the videos/);
+    expect(screen.getByRole("heading", { name: "Videos" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Blue tit" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("says_loading_before_the_first_load_and_announces_the_position", async () => {
+    serve(three());
+    render(Videos);
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    await screen.findByText("1 of 3");
+    expect(screen.getByText("1 of 3").getAttribute("aria-live")).toBe("polite");
+    expect(screen.queryByText("Loading…")).toBeNull();
   });
 });
