@@ -34,7 +34,7 @@ class ZipPlan:
 
 
 def _label(row: sqlite3.Row) -> str:
-    name = row["species_name"]
+    name = (row["species_name"] or "").replace("/", " ").replace("\\", " ").strip().lstrip(".").strip()
     if name:
         return name[:1].upper() + name[1:]
     if row["category"] == "other":
@@ -69,29 +69,39 @@ def plan_zip(
             raise TooMany(f"Too many visits for one .zip (max {MAX_VISITS})")
     rows.sort(key=lambda r: (r["started_at"], r["id"]))
 
+    root = media_dir.resolve()
+
+    def inside(rel: str | None) -> Path | None:
+        """The file under media_dir, or None (missing, or a path that escapes it)."""
+        if not rel:
+            return None
+        try:
+            target = (root / rel).resolve()
+            return target if target.is_relative_to(root) and target.is_file() else None
+        except (ValueError, OSError):
+            return None
+
     entries: list[tuple[str, Path]] = []
     used: set[str] = set()
     visits = 0
     for row in rows:
         files: list[tuple[str, Path]] = []  # (extension, path)
         for clip in repo.clips_for_visit(conn, row["id"]):
-            if clip.web_path and (media_dir / clip.web_path).is_file():
-                files.append((".mp4", media_dir / clip.web_path))
-        if row["best_frame_path"] and (media_dir / row["best_frame_path"]).is_file():
-            files.append((".jpg", media_dir / row["best_frame_path"]))
+            if (p := inside(clip.web_path)) is not None:
+                files.append((".mp4", p))
+        if (p := inside(row["best_frame_path"])) is not None:
+            files.append((".jpg", p))
         if not files:
             continue
         visits += 1
         base = f"{_time_label(row['started_at'])} {_label(row)}"
-        n = 1
-        while base.lower() in used:
-            n += 1
-            base = f"{_time_label(row['started_at'])} {_label(row)} ({n})"
-        used.add(base.lower())
-        seen_ext: dict[str, int] = {}
         for ext, path in files:
-            k = seen_ext[ext] = seen_ext.get(ext, 0) + 1
-            entries.append((f"{base}{'' if k == 1 else f' ({k})'}{ext}", path))
+            name, n = f"{base}{ext}", 1
+            while name.lower() in used:
+                n += 1
+                name = f"{base} ({n}){ext}"
+            used.add(name.lower())
+            entries.append((name, path))
     if not entries:
         raise NothingToDownload("nothing to download")
     filename = f"fat-ball-{day.isoformat()}.zip" if day is not None else f"fat-ball-{visits}-visits.zip"

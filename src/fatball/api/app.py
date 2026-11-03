@@ -5,6 +5,7 @@ import binascii
 import secrets as token_secrets
 import shutil
 import sqlite3
+import threading
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -383,6 +384,7 @@ def create_app(
         else:
             repo.requeue_recognition(conn, clip_id)
 
+    zip_lock = threading.Lock()  # sync endpoints run in a thread pool
     zip_plans: dict[str, tuple[datetime, zips.ZipPlan]] = {}  # token -> (expires, plan); pruned on each POST
 
     @app.post("/api/downloads/zip")
@@ -400,12 +402,13 @@ def create_app(
         except zips.NothingToDownload:
             raise HTTPException(status_code=404, detail="Nothing to download") from None
         t = now()
-        for k in [k for k, (expires, _) in zip_plans.items() if expires <= t]:
-            del zip_plans[k]
-        while len(zip_plans) >= ZIP_TOKEN_MAX:
-            del zip_plans[next(iter(zip_plans))]  # dicts keep insertion order: the oldest goes
         token = token_secrets.token_urlsafe(16)
-        zip_plans[token] = (t + ZIP_TOKEN_TTL, plan)
+        with zip_lock:
+            for k in [k for k, (expires, _) in zip_plans.items() if expires <= t]:
+                del zip_plans[k]
+            while len(zip_plans) >= ZIP_TOKEN_MAX:
+                del zip_plans[next(iter(zip_plans))]  # dicts keep insertion order: the oldest goes
+            zip_plans[token] = (t + ZIP_TOKEN_TTL, plan)
         return {
             "token": token, "size_bytes": plan.size_bytes, "visits": plan.visits, "files": len(plan.entries),
             "filename": plan.filename,
@@ -413,7 +416,8 @@ def create_app(
 
     @app.get("/api/downloads/zip/{token}")
     def download_zip(token: str):
-        entry = zip_plans.get(token)
+        with zip_lock:
+            entry = zip_plans.get(token)
         if entry is None or entry[0] <= now():
             raise HTTPException(status_code=404)
         plan = entry[1]

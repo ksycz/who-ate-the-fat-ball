@@ -130,3 +130,47 @@ def test_day_zip_for_category(conn, media, cam):
     assert plan.visits == 1 and [n for n, _ in plan.entries] == [
         "2026-11-02 09-00 Great tit.mp4", "2026-11-02 09-00 Great tit.jpg"]
     assert zips.plan_zip(conn, media, day=date(2026, 11, 2)).visits == 2
+
+
+def test_plan_skips_paths_outside_media_dir(conn, media, cam, tmp_path):
+    t = datetime(2026, 11, 2, 9, 0)
+    cid, v = add_visit(conn, media, cam, t, video=None, frame=None)
+    (tmp_path / "outside.mp4").write_bytes(b"secret")
+    (tmp_path / "outside.jpg").write_bytes(b"secret")
+    conn.execute("UPDATE clip SET web_path = '../outside.mp4' WHERE id = ?", (cid,))
+    conn.execute("UPDATE clip SET best_frame_path = ? WHERE id = ?", (str(tmp_path / "outside.jpg"), cid))
+    conn.execute("UPDATE visit SET best_frame_path = ? WHERE id = ?", (str(tmp_path / "outside.jpg"), v))
+    conn.commit()
+    with pytest.raises(zips.NothingToDownload):
+        zips.plan_zip(conn, media, visit_ids=[v])
+    _, v2 = add_visit(conn, media, cam, t + timedelta(hours=1))
+    plan = zips.plan_zip(conn, media, visit_ids=[v, v2])
+    assert plan.size_bytes == 6 and plan.visits == 1
+
+
+def test_plan_names_distinct_with_multi_clip_and_same_minute(conn, media, cam):
+    t = datetime(2026, 11, 2, 9, 12, 0)
+    _, a = add_visit(conn, media, cam, t)
+    cid = repo.add_clip(conn, cam, "/x.h265", t + timedelta(seconds=20), t + timedelta(seconds=30), "video", 1)
+    repo.set_clip_status(conn, cid, "ready", web_path=f"c{cid}.mp4")
+    (media / f"c{cid}.mp4").write_bytes(b"x")
+    repo.set_recognition(conn, cid, best_frame_path=None, verdict_json=verdict_to_json(sure()), recognized_at=t)
+    assert assign_visit(conn, repo.get_clip(conn, cid), sure()) == a
+    _, b = add_visit(conn, media, cam, t + timedelta(minutes=5))
+    conn.execute("UPDATE visit SET started_at = ? WHERE id = ?", (t.isoformat(), b))
+    conn.commit()
+    names = [n for n, _ in zips.plan_zip(conn, media, visit_ids=[a, b]).entries]
+    assert len(names) == 5 and len({n.lower() for n in names}) == 5
+
+
+def test_plan_label_cannot_make_folders(conn, media, cam):
+    _, v = add_visit(conn, media, cam, datetime(2026, 11, 2, 9, 0))
+    conn.execute("UPDATE species_name SET name = '../a/b\\c' WHERE species_id = (SELECT id FROM species WHERE scientific_name = ?)", (GREAT,))
+    conn.commit()
+    for name, _ in zips.plan_zip(conn, media, visit_ids=[v]).entries:
+        assert "/" not in name and "\\" not in name and not name.startswith(".")
+
+
+def test_plan_accepts_exactly_500_visit_ids(conn, media, cam):
+    _, v = add_visit(conn, media, cam, datetime(2026, 11, 2, 9, 0))
+    assert zips.plan_zip(conn, media, visit_ids=[v] + list(range(1000, 1499))).visits == 1
