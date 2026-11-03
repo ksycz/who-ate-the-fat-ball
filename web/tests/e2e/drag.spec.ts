@@ -16,7 +16,7 @@ test.afterAll(async ({ request }) => {
 const sortedCount = async (request: import("@playwright/test").APIRequestContext, key: string) =>
   ((await (await request.get("/api/status")).json()).sorted as Record<string, number>)[key];
 
-// Editing is open on the Mac itself; skip if the service says otherwise.
+// Open Birds and wait for the ⋯ buttons, which only appear once editing is known to be open.
 async function unlocked(page: import("@playwright/test").Page) {
   await page.goto("/birds");
   await expect(page.getByRole("button", { name: /^More actions for / }).first()).toBeVisible();

@@ -4,7 +4,8 @@
   import { CATEGORY_DOTS, CATEGORY_NAMES } from "../lib/format";
 
   // The ⋯ menu on a visit card: move it to either of the other two categories.
-  let { current, onchoose, onclose }: { current: Category; onchoose: (c: Category) => void; onclose: () => void } = $props();
+  // `button` is the ⋯ that opened it: clicking it is not "outside" (it toggles the menu itself).
+  let { current, onchoose, onclose, button }: { current: Category; onchoose: (c: Category) => void; onclose: () => void; button?: HTMLElement } = $props();
 
   const ALL: Category[] = ["birds", "other_animals", "other"];
   const targets = $derived(ALL.filter((c) => c !== current));
@@ -16,7 +17,7 @@
     // A click anywhere else closes it (the ⋯ button toggles it itself).
     const away = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (!root.contains(t) && !(t as HTMLElement).closest?.("[data-card-menu-button]")) onclose();
+      if (!root.contains(t) && !button?.contains(t)) onclose();
     };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
@@ -50,7 +51,7 @@
 
 <style>
   .menu {
-    position: absolute; z-index: 5; top: 52px; right: 10px; min-width: 190px; padding: 6px; border-radius: 14px;
+    position: absolute; z-index: 5; top: 50px; right: 8px; min-width: 190px; padding: 6px; border-radius: 14px;
     background: #fff; border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(40, 30, 20, 0.22);
     display: flex; flex-direction: column; gap: 2px;
   }

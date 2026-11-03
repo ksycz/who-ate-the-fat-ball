@@ -102,6 +102,21 @@ describe("VisitCard ⋯ button", () => {
     expect(document.activeElement).toBe(more);
   });
 
+  it("opening a second card's menu closes the first", async () => {
+    screenIs(true);
+    canEdit.set(true);
+    render(VisitCard, { visit, today: "2026-11-03" });
+    render(VisitCard, { visit: { ...visit, id: 8 }, today: "2026-11-03" });
+    const [a, b] = screen.getAllByRole("button", { name: "More actions for Great tit" });
+    await fireEvent.click(a);
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    await fireEvent.mouseDown(b);
+    await fireEvent.click(b);
+    expect(a.getAttribute("aria-expanded")).toBe("false");
+    expect(b.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+  });
+
   it("choosing moves the visit with one bulk request", async () => {
     screenIs(true);
     canEdit.set(true);
@@ -133,5 +148,15 @@ describe("SortedInto drop targets", () => {
     await fireEvent.drop(animals);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(get(dragged)).toBeNull();
+  });
+
+  it("a cancelled drag leaves no highlighted row", async () => {
+    render(SortedInto, { sorted: { birds: 3, other_animals: 1, other: 0, favourites: 0 } as never });
+    dragged.set({ id: 7, category: "birds", name: "Great tit" });
+    const animals = screen.getByRole("link", { name: /^Other animals/ });
+    await fireEvent.dragOver(animals);
+    expect(animals.classList.contains("over")).toBe(true);
+    dragged.set(null);
+    await vi.waitFor(() => expect(animals.classList.contains("over")).toBe(false));
   });
 });

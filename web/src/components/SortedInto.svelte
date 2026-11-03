@@ -15,6 +15,10 @@
 
   // While a card is dragged (the Mac layout), each row other than its own category takes a drop.
   let over = $state<Category | null>(null);
+  // A cancelled drag (Esc, dropped elsewhere) leaves no highlighted row behind.
+  $effect(() => {
+    if (!$dragged) over = null;
+  });
   const accepts = (c: Category) => !big && !!$dragged && $dragged.category !== c;
   function drop(e: DragEvent, c: Category) {
     if (!accepts(c)) return;
@@ -60,8 +64,9 @@
     font-size: 14px; font-weight: 500; color: var(--ink);
   }
   .item.on { background: var(--robin-tint); font-weight: 600; color: var(--robin-dark); }
-  .item { border: 2px solid transparent; }
-  .item.over { background: var(--robin-tint); border: 2px dashed var(--robin); }
+  .item { box-sizing: border-box; border: 1px solid transparent; }
+  /* 2px dashed, with 1px less padding so the label does not move and the row keeps its height */
+  .item.over { background: var(--robin-tint); border: 2px dashed var(--robin); padding: 0 9px; }
   .label { flex: 1; }
   .count { font-size: 12px; color: var(--ink-2); }
   .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(46, 33, 22, 0.45); }

@@ -27,6 +27,10 @@
   let menuOpen = $state(false);
   let moreButton: HTMLButtonElement | undefined = $state();
   const name = $derived(visitName(visit));
+  // Resizing, locking or entering select mode takes the menu away with the button.
+  $effect(() => {
+    if (!movable) menuOpen = false;
+  });
 
   function choose(category: Category) {
     menuOpen = false;
@@ -87,10 +91,9 @@
 {:else if pending}
   <div class="card">{@render body()}</div>
 {:else}
-  <div class="cell">
+  <div class="cell" class:dragging={$dragged?.id === visit.id}>
     <a
       class="card"
-      class:dragging={$dragged?.id === visit.id}
       href="/visit/{visit.id}"
       use:link
       draggable={movable ? "true" : undefined}
@@ -101,16 +104,15 @@
       <button
         type="button"
         class="more"
-        data-card-menu-button
         bind:this={moreButton}
         aria-label="More actions for {name}"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onclick={() => (menuOpen = !menuOpen)}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
       </button>
-      {#if menuOpen}<CardMenu current={visit.category} onchoose={choose} onclose={closeMenu} />{/if}
+      {#if menuOpen}<CardMenu button={moreButton} current={visit.category} onchoose={choose} onclose={closeMenu} />{/if}
     {/if}
   </div>
 {/if}
@@ -126,13 +128,13 @@
   }
   .cell { position: relative; display: flex; flex-direction: column; }
   .cell > .card { flex: 1; }
-  .card.dragging { opacity: 0.45; }
+  .cell.dragging { opacity: 0.45; }
   .more {
-    position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.94); color: var(--ink);
-    cursor: pointer; box-shadow: 0 1px 4px rgba(40, 30, 20, 0.25);
+    position: absolute; top: 8px; right: 8px; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; background: rgba(46, 33, 22, 0.6);
+    cursor: pointer;
   }
-  .more:hover, .more[aria-expanded="true"] { background: var(--robin-tint); }
+  .more:hover, .more[aria-expanded="true"] { background: rgba(46, 33, 22, 0.8); }
   .card.selecting { position: relative; cursor: pointer; }
   .card.selected { outline: 3px solid var(--robin); outline-offset: -3px; }
   .pick {
