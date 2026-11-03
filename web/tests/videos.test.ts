@@ -256,7 +256,7 @@ describe("Videos", () => {
     });
     let release: () => void = () => {};
     const slow = new Promise<void>((r) => (release = r));
-    const base = fetchMock.getMockImplementation()!;
+    const base = fetchMock.getMockImplementation() as (url: string) => Promise<Response>;
     fetchMock.mockImplementation(async (url: string) => {
       if (url.includes("cursor=c2")) {
         await slow;
@@ -265,7 +265,7 @@ describe("Videos", () => {
       return base(url);
     });
     render(Videos);
-    await screen.findByText("1 of 3");
+    await screen.findByText("1 of 5");
     const next = screen.getByRole("button", { name: "Next clip" }) as HTMLButtonElement;
     await fireEvent.click(next);
     await fireEvent.click(next);
@@ -277,8 +277,9 @@ describe("Videos", () => {
     await tick();
     expect(position()).toBe("1 of 2");
     expect(video().getAttribute("src")).toBe("/media/web/9.mp4");
-    expect(next.disabled).toBe(false);
-    await fireEvent.click(next);
+    const again = screen.getByRole("button", { name: "Next clip" }) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    await fireEvent.click(again);
     expect(position()).toBe("2 of 2");
   });
 

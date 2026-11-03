@@ -54,6 +54,7 @@
   async function restart(sp: string | null) {
     const mine = ++generation;
     species = sp;
+    loadingMore = false;
     index = 0;
     items = [];
     cursor = null;
@@ -98,7 +99,7 @@
       } catch {
         if (mine === generation) showToast("Couldn't load more videos. Try again in a moment.");
       } finally {
-        loadingMore = false;
+        if (mine === generation) loadingMore = false;
       }
     }
   }
@@ -130,6 +131,7 @@
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     if (pickerOpen || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     const t = e.target;
+    if (t instanceof HTMLVideoElement) return; // arrows seek inside the player
     if (t instanceof Element && t.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
     e.preventDefault();
     if (e.key === "ArrowRight") next();
@@ -194,39 +196,43 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="page">
-  {#if failed}
-    <div class="message">
-      <p>Couldn't load the videos. Check the Wi-Fi and try again.</p>
-      <button type="button" class="again" onclick={() => restart(species)}>Try again</button>
-    </div>
-  {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <section class="feed" aria-label="Videos feed" onpointerdown={onDown} onpointerup={onUp} onpointercancel={() => (start = null)}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <section class="feed" aria-label="Videos feed" onpointerdown={onDown} onpointerup={onUp} onpointercancel={() => (start = null)}>
+    <div class="stage">
       {#if item}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={item.video_url} poster={item.poster_url ?? item.best_frame_url ?? undefined} playsinline muted autoplay controls preload="metadata"></video>
-      {:else if loaded}
-        <p class="empty">{species === null ? "No bird videos yet. They will show up here as the feeder gets visitors." : "No videos of this bird yet."}</p>
       {/if}
 
       <header>
         <div class="title-row">
           <h1>Videos</h1>
-          {#if item}<span class="position">{index + 1} of {total}</span>{/if}
+          <span class="position" aria-live="polite">{#if item}{index + 1} of {total}{/if}</span>
         </div>
         {#if filters.length > 0}
           <FilterChips tone="dark" options={chipLabels} value={chipValue} onchange={chooseChip} />
         {/if}
       </header>
 
+      {#if failed}
+        <div class="message">
+          <p>Couldn't load the videos. Check the Wi-Fi and try again.</p>
+          <button type="button" class="again" onclick={() => restart(species)}>Try again</button>
+        </div>
+      {:else if !loaded}
+        <p class="empty">Loading…</p>
+      {:else if !item}
+        <p class="empty">{species === null ? "No bird videos yet. They will show up here as the feeder gets visitors." : "No videos of this bird yet."}</p>
+      {/if}
+
       {#if item}
         <div class="rail">
           {#if $canEdit}
-            <button type="button" class="rail-btn" aria-pressed={item.is_favourite} disabled={busy} onclick={toggleFavourite}>
+            <button type="button" class="rail-btn" aria-label="Favourite" aria-pressed={item.is_favourite} disabled={busy} onclick={toggleFavourite}>
               <span class="disc">
                 <svg width="26" height="26" viewBox="0 0 24 24" fill={item.is_favourite ? "var(--robin)" : "none"} stroke="#fff" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"></path></svg>
               </span>
-              {item.is_favourite ? "Saved" : "Favourite"}
+              <span aria-hidden="true">{item.is_favourite ? "Saved" : "Favourite"}</span>
             </button>
             <button type="button" class="rail-btn" aria-haspopup="dialog" bind:this={changeButton} onclick={() => (pickerOpen = true)}>
               <span class="disc">
@@ -242,23 +248,25 @@
             Download
           </a>
         </div>
+      {/if}
+    </div>
 
-        <div class="bar">
-          <div class="who">
-            <div class="name">{name}</div>
-            <div class="when">
-              {visitTime(item.started_at, item.ended_at, today)}
-              {#if note}<span class="note" class:mine={item.corrected || item.category !== "birds"}>{note}</span>{/if}
-            </div>
-          </div>
-          <div class="buttons">
-            <button type="button" class="prev" disabled={index === 0} onclick={previous}>Previous</button>
-            <button type="button" class="next" disabled={atEnd || loadingMore} onclick={next}>Next clip</button>
+    {#if item}
+      <div class="bar">
+        <div class="who">
+          <div class="name">{name}</div>
+          <div class="when">
+            {visitTime(item.started_at, item.ended_at, today)}
+            {#if note}<span class="note" class:mine={item.corrected || item.category !== "birds"}>{note}</span>{/if}
           </div>
         </div>
-      {/if}
-    </section>
-  {/if}
+        <div class="buttons">
+          <button type="button" class="prev" disabled={index === 0} onclick={previous}>Previous</button>
+          <button type="button" class="next" disabled={atEnd || loadingMore} onclick={next}>Next clip</button>
+        </div>
+      </div>
+    {/if}
+  </section>
 </div>
 
 {#if pickerOpen && item}
@@ -268,9 +276,11 @@
 <style>
   .page { background: var(--ink); color: #fff; height: calc(100dvh - var(--nav-phone-h)); min-height: 480px; display: flex; flex-direction: column; }
   .feed {
-    position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; user-select: none;
+    flex: 1; min-height: 0; display: flex; flex-direction: column; touch-action: none; user-select: none;
     background: #000; width: 100%; margin: 0 auto;
   }
+  /* The bar sits below the picture, so the player's own controls row stays clickable. */
+  .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
   header {
     position: absolute; left: 0; right: 0; top: 0; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px;
@@ -279,7 +289,7 @@
   .title-row { display: flex; align-items: center; justify-content: space-between; }
   h1 { margin: 0; font-weight: 800; font-size: 22px; }
   .position { font-size: 13px; color: var(--sand); }
-  .rail { position: absolute; right: 12px; bottom: 196px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .rail { position: absolute; right: 12px; bottom: 72px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
   .rail-btn {
     display: flex; flex-direction: column; align-items: center; gap: 4px; border: none; background: none; color: #fff;
     font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; min-width: 52px; min-height: 52px;
@@ -288,10 +298,8 @@
   .disc { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 50%; background: rgba(46, 33, 22, 0.55); }
   .rail a.rail-btn { color: #fff; }
   .bar {
-    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px;
-    background: rgba(46, 33, 22, 0.72); pointer-events: none;
+    flex: none; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--ink);
   }
-  .bar > * { pointer-events: auto; }
   .name { font-weight: 800; font-size: 24px; }
   .when { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--sand); flex-wrap: wrap; }
   .note { font-size: 12px; font-weight: 600; color: var(--chip-ink); background: var(--chip); border-radius: 999px; padding: 5px 9px; }
@@ -301,7 +309,7 @@
   .prev { border: 1px solid rgba(255, 255, 255, 0.45); background: transparent; }
   .next { border: none; background: var(--robin); }
   .buttons button:disabled { opacity: 0.4; cursor: default; }
-  .empty, .message { margin: 0; padding: 120px 24px 24px; text-align: center; font-size: 17px; font-weight: 600; }
+  .empty, .message { position: absolute; left: 0; right: 0; top: 120px; margin: 0; padding: 24px; text-align: center; font-size: 17px; font-weight: 600; }
   .message { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .message p { margin: 0; }
   .again {
