@@ -20,3 +20,10 @@ dist/
 
 # Local prototype scripts and real-camera data (never committed)
 local/
+
+# Gallery (Svelte): build output lands in the Python package; never committed
+src/fatball/api/static/
+web/node_modules/
+web/test-results/
+.e2e-data*/
+web/playwright-report/

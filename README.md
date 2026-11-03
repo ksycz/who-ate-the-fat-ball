@@ -3,9 +3,15 @@
 [![CI](https://github.com/ksycz/who-ate-the-fat-ball/actions/workflows/ci.yml/badge.svg)](https://github.com/ksycz/who-ate-the-fat-ball/actions/workflows/ci.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
-A free, local app for bird-feeder cameras: it collects the clips for you and (soon) tells you who has been visiting. No ads, no cloud, no false alarms.
+A free, local app for bird-feeder cameras: it collects the clips for you and tells you who has been visiting. No ads, no cloud, no false alarms.
 
-> **Status: phase 1, the foundation.** Clip ingest, conversion, the library and the API work today. Bird recognition and the gallery are not built yet.
+> **Status: phase 1, gallery part 1.** Clip ingest, bird recognition and a gallery you can open on your phone, iPad or Mac work today. Videos, Stats and bulk tools come in Plan 4.
+
+| Mac | Phone |
+|---|---|
+| ![Today on a Mac, a grid of visits](docs/screenshots/mac-today.png) | ![Today on a phone](docs/screenshots/phone-today.png) |
+
+<sub>Screenshots from demo mode, with generated test-pattern clips.</sub>
 
 ## The problem
 
@@ -26,20 +32,27 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
   - On the owner's 63 hand-labelled clips, it put 59 in the right section and named 13 of 17 clear birds.
   - It takes about 1 s per clip, under 300 MB of memory, at low priority.
   - On the real camera, new clips were recognised a median of 13 s after download.
+- **A gallery on your phone, iPad and Mac** at `http://<your Mac's name>.local:8080`:
+  - **Today**: the day's visits, the fat-ball champion, a banner for a new species and the camera's status.
+  - **Birds, Other animals, Other and Favourites**: every visit, grouped by day.
+  - **A visit**: play its clips, mark it as a favourite, download it, and fix a wrong name with "What is it?" (with Undo).
+  - Phones and iPads can look; changing anything needs the edit PIN (**More → Unlock editing**).
+  - It can be added to the home screen, and works on a phone, an iPad and a big screen.
 
 ## What's coming
 
-- **Plan 3: the gallery.** A web app (installable on a phone or iPad) built from the prototypes in the design process.
+- **Plan 4: the gallery, part 2.** Videos, By species, selecting and moving many visits, zip downloads, drag-and-drop on the Mac, Stats with a heatmap and a Mac notification for a new species.
 
 ## Try the demo
 
 ```sh
-brew install ffmpeg uv
+brew install ffmpeg uv node
 uv sync
+npm --prefix web ci && npm --prefix web run build   # build the gallery once
 uv run fatball demo
 ```
 
-Then open <http://localhost:8080/api/status> and <http://localhost:8080/api/clips>. The gallery UI comes in Plan 3, so for now you get the API.
+Then open <http://localhost:8080>. The demo uses a pretend camera and generated test clips, and keeps nothing afterwards.
 
 ## Use it with your camera
 
@@ -50,6 +63,8 @@ scripts/install-launchagent.sh   # optional: start at login and restart after a 
 ```
 
 The setup page is only available at <http://localhost:8080> on the Mac itself. Run `uv run fatball --help` for all options.
+
+**Opening the gallery on a phone or iPad:** use `http://<your Mac's name>.local:8080` on the same Wi-Fi (on Android, the Mac's IP address also works, e.g. `http://192.168.1.20:8080`). If an Android phone says a local-network permission is missing, allow it under **Settings → Apps → Chrome → Permissions → Nearby devices**. On an iPhone or iPad, a browser other than Safari needs **Settings → Privacy & Security → Local Network**.
 
 **If the app says "camera not found" while the camera is awake:** macOS may be blocking the program from your home network. Run `fatball serve` from the Terminal app and click **Allow** when macOS asks about finding devices on the local network, or turn on the app you run it from under **System Settings → Privacy & Security → Local Network**.
 
@@ -73,7 +88,7 @@ flowchart LR
         down["Downloader"]
         conv["Converter<br/>(H.265 original + H.264 web copy)"]
         lib[("Library<br/>SQLite + media folder")]
-        api["Web server<br/>(API)"]
+        api["Web server<br/>(API + gallery)"]
         link --> watch --> down --> conv --> lib --> api
     end
     cam -- "port 34567 (DVRIP)" --> link
@@ -81,7 +96,7 @@ flowchart LR
     api --> browsers["Browsers on Mac, Android, iPad"]
 ```
 
-The camera link is the only code that speaks the Xiongmai protocol, and the library is the only code that touches SQLite and media files. Later phases add a bird spotter between the converter and the library, and a gallery served by the same process. See the [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md) for the full picture.
+The camera link is the only code that speaks the Xiongmai protocol, and the library is the only code that touches SQLite and media files. The bird spotter sits between the converter and the library, and the same process serves the gallery (Svelte, built into `src/fatball/api/static/`). See the [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md) for the full picture.
 
 ## Privacy and security
 
@@ -126,14 +141,19 @@ Before the app upgrades an existing library to a newer format, it saves a copy n
 
 ## Design process
 
-The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques (coming to this repo) informed the gallery. Screenshots will be added with the gallery in Plan 3.
+The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques informed the gallery; [Plan 3 results](docs/plan-3-results.md) has the device trial and more screenshots.
 
 ## Development
 
 ```sh
 uv run pytest
 uv run ruff check
+npm --prefix web test        # gallery unit tests
+npm --prefix web run check   # gallery type check
+npm --prefix web run dev     # gallery with live reload, talking to a running fatball on :8080
 ```
+
+End-to-end tests (Playwright, with axe accessibility checks) run against generated test libraries: `cd web && npx playwright test --project=chromium`. CI also runs them in WebKit at iPad size and in Chrome at phone size.
 
 - `src/fatball/camera/`: DVRIP protocol, client, discovery, fake camera
 - `src/fatball/ingest/`: watcher and processor
@@ -141,6 +161,7 @@ uv run ruff check
 - `src/fatball/library/`: SQLite schema and repository
 - `src/fatball/recognition/`: the Core ML bird detector
 - `src/fatball/api/`: FastAPI app and edit-PIN auth
+- `web/`: the gallery (Svelte 5, TypeScript, Vite), built into `src/fatball/api/static/`
 - `tests/`: unit and integration tests, using the fake camera
 
 ## Licence

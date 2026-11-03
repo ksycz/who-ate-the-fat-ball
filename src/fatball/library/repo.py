@@ -456,9 +456,18 @@ def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
     return cur.rowcount == 1
 
 
+# One column of the visit's best clip, or of its first clip when it has no best one.
+_VISIT_CLIP_PICK = (
+    "(SELECT c.%s FROM visit_clip vc JOIN clip c ON c.id = vc.clip_id WHERE vc.visit_id = v.id "
+    "ORDER BY (c.id = v.best_clip_id) DESC, c.begin_at, c.id LIMIT 1)"
+)
 _VISIT_SELECT = (
     "SELECT v.*, s.scientific_name AS species_scientific, n.name AS species_name, "
-    "(SELECT COUNT(*) FROM visit_clip vc WHERE vc.visit_id = v.id) AS clip_count "
+    "(SELECT COUNT(*) FROM visit_clip vc WHERE vc.visit_id = v.id) AS clip_count, "
+    "(SELECT COALESCE(SUM(c.duration_s), 0) FROM visit_clip vc JOIN clip c ON c.id = vc.clip_id "
+    "WHERE vc.visit_id = v.id) AS duration_s, "
+    f"{_VISIT_CLIP_PICK % 'poster_path'} AS poster_path, {_VISIT_CLIP_PICK % 'preview_path'} AS preview_path, "
+    "v.moved_by_user AS corrected "
     "FROM visit v LEFT JOIN species s ON s.id = v.species_id "
     "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
 )
@@ -472,9 +481,12 @@ def list_visits(
     category: str | None = None,
     species: str | None = None,
     day: date | None = None,
+    favourite: bool | None = None,
 ) -> list[sqlite3.Row]:
-    """Visits newest first. `after` is the (started_at, id) of the last visit already seen; `day` is the
-    local date of started_at (stored as local-time ISO text, like clips)."""
+    """Visits newest first (`favourite` keeps only starred or only unstarred ones).
+
+    `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
+    (stored as local-time ISO text, like clips)."""
     where, args = [], []
     if after is not None:
         where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
@@ -488,8 +500,30 @@ def list_visits(
     if day is not None:
         where.append("substr(v.started_at, 1, 10) = ?")
         args.append(day.isoformat())
+    if favourite is not None:
+        where.append("v.is_favourite = ?")
+        args.append(int(favourite))
     clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
     return conn.execute(f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?", (*args, limit)).fetchall()
+
+
+def sorted_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """How many visits are in each category, and how many are favourites."""
+    counts = {"birds": 0, "other_animals": 0, "other": 0}
+    for r in conn.execute("SELECT category, COUNT(*) AS n FROM visit GROUP BY category"):
+        counts[r["category"]] = r["n"]
+    favourites = conn.execute("SELECT COUNT(*) FROM visit WHERE is_favourite = 1").fetchone()[0]
+    return {**counts, "favourites": favourites}
+
+
+def species_overview(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every species in the catalog with its visit count and last sighting: birds first, then most visits, then name."""
+    return conn.execute(
+        "SELECT s.scientific_name, n.name, s.\"group\" AS grp, COUNT(v.id) AS visits, MAX(v.started_at) AS last_seen_at "
+        "FROM species s LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+        "LEFT JOIN visit v ON v.species_id = s.id GROUP BY s.id "
+        "ORDER BY (s.\"group\" != 'bird'), visits DESC, n.name, s.id"
+    ).fetchall()
 
 
 def get_visit(conn: sqlite3.Connection, visit_id: int) -> sqlite3.Row | None:

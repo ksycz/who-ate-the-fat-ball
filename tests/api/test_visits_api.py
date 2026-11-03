@@ -72,7 +72,8 @@ def test_list_visits_filters_and_paginates(local, conn, cam):
     assert third["next_cursor"] is None
     item = first["items"][0]
     assert set(item) == {"id", "started_at", "ended_at", "category", "species", "subject", "confidence",
-                         "is_favourite", "best_frame_url", "clip_count"}
+                         "is_favourite", "best_frame_url", "clip_count", "duration_s", "poster_url", "preview_url",
+                         "corrected", "watched"}
     assert item["best_frame_url"].startswith("/media/frames/")
 
 
