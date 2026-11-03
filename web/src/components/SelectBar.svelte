@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Category } from "../lib/api";
   import { wide } from "../lib/media";
-  import { CATEGORY_NAMES, plural } from "../lib/format";
+  import { CATEGORY_DOTS, CATEGORY_NAMES, plural } from "../lib/format";
   import { canEdit } from "../lib/session";
 
   let {
@@ -22,11 +22,6 @@
     ondelete?: () => void;
   } = $props();
 
-  const DOTS: Record<Category, string> = {
-    birds: "var(--robin)",
-    other_animals: "var(--dot-animals)",
-    other: "var(--dot-other)",
-  };
   const ALL: Category[] = ["birds", "other_animals", "other"];
 
   // A category list offers the other two; Favourites mixes them all, so it offers all three.
@@ -46,7 +41,7 @@
     <div class="targets" role="group" aria-label="Move to">
       {#each targets as c (c)}
         <button type="button" class="ghost" disabled={busy || count === 0} onclick={() => onmove(c)}>
-          <span class="dot" style:background={DOTS[c]}></span>{CATEGORY_NAMES[c]}
+          <span class="dot" style:background={CATEGORY_DOTS[c]}></span>{CATEGORY_NAMES[c]}
         </button>
       {/each}
     </div>
@@ -55,7 +50,7 @@
     {#if $canEdit && $wide}
       {#each targets as c (c)}
         <button type="button" class="ghost" disabled={busy || count === 0} onclick={() => onmove(c)}>
-          <span class="dot" style:background={DOTS[c]}></span>Move to {CATEGORY_NAMES[c]}
+          <span class="dot" style:background={CATEGORY_DOTS[c]}></span>Move to {CATEGORY_NAMES[c]}
         </button>
       {/each}
     {:else if $canEdit}

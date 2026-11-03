@@ -156,6 +156,13 @@ export function dayOf(at: string): string {
   return dayKey(parseWall(at));
 }
 
+// The colour dot beside each category (the same as in the side menu).
+export const CATEGORY_DOTS: Record<Category, string> = {
+  birds: "var(--robin)",
+  other_animals: "var(--dot-animals)",
+  other: "var(--dot-other)",
+};
+
 export const CATEGORY_NAMES: Record<Category, string> = {
   birds: "Birds",
   other_animals: "Other animals",
