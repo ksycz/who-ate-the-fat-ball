@@ -27,3 +27,4 @@ web/node_modules/
 web/test-results/
 .e2e-data*/
 web/playwright-report/
+*-E
