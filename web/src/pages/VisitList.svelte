@@ -2,11 +2,13 @@
   import { onMount, tick } from "svelte";
   import { ApiError, getJSON, type Category, type Today, type Visit } from "../lib/api";
   import { dayHeading, dayOf, visitName } from "../lib/format";
-  import { moveVisits, selection } from "../lib/select";
+  import { deleteEmptyClips, moveVisits, selection } from "../lib/select";
   import { changes, noteServerDay, serverDay, showToast } from "../lib/session";
   import { askZip, type ZipPlan, type ZipRequest } from "../lib/zip";
-  import { loadList, saveList } from "../lib/listCache";
+  import { loadList, loadOtherFilter, saveList, saveOtherFilter } from "../lib/listCache";
   import { arrival } from "../lib/router";
+  import DeleteConfirm from "../components/DeleteConfirm.svelte";
+  import FilterChips from "../components/FilterChips.svelte";
   import NewSpeciesBanner from "../components/NewSpeciesBanner.svelte";
   import SelectBar from "../components/SelectBar.svelte";
   import VisitCard from "../components/VisitCard.svelte";
@@ -14,6 +16,15 @@
 
   type Kind = "birds" | "other_animals" | "other" | "favourites";
   let { kind }: { kind: Kind } = $props();
+
+  type Filter = "all" | "dogs" | "empty";
+  const FILTER_LABELS: Record<Filter, string> = { all: "All", dogs: "Only dogs", empty: "Empty clips" };
+  const FILTER_EMPTY: Record<Filter, string> = {
+    all: "Nothing here: no dogs, people or empty clips",
+    dogs: "No dogs here",
+    empty: "No empty clips",
+  };
+  const FILTER_OPTIONS = Object.values(FILTER_LABELS);
 
   const PAGE = 50;
   const TITLES: Record<Kind, string> = {
@@ -36,14 +47,29 @@
   let failed = $state(false);
   let newSpecies = $state<Today["new_species"]>(null);
   let sentinel = $state<HTMLElement | null>(null);
+  let filter = $state<Filter>("all"); // only used on Other
+  let confirmingDelete = $state(false);
   let zipPlan = $state<ZipPlan | null>(null);
   let working = $state(false); // a move or a zip request is on its way
   let generation = 0; // bumped on every reload so a slow older response is dropped
+
+  // Remembered lists are kept per filter: "other:empty".
+  const cacheKey = () => (kind === "other" && filter !== "all" ? `other:${filter}` : kind);
+
+  function chooseFilter(label: string) {
+    const next = (Object.keys(FILTER_LABELS) as Filter[]).find((f) => FILTER_LABELS[f] === label);
+    if (!next || next === filter) return;
+    filter = next;
+    saveOtherFilter(next);
+    selection.clear(); // picks belong to the list they were made on
+    reload();
+  }
 
   function url(after: string | null): string {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (kind === "favourites") q.set("favourite", "true");
     else q.set("category", kind);
+    if (kind === "other" && filter !== "all") q.set("only", filter);
     if (after !== null) q.set("cursor", after);
     return `/api/visits?${q}`;
   }
@@ -101,6 +127,14 @@
     working = false;
   }
 
+  async function deleteSelected() {
+    if (working || picked.length === 0) return;
+    working = true;
+    await deleteEmptyClips(picked); // on a failure the picks stay
+    confirmingDelete = false;
+    working = false;
+  }
+
   // Ask the Mac how big the .zip is; the owner then confirms before anything downloads.
   async function planZip(body: ZipRequest) {
     if (working) return;
@@ -127,7 +161,9 @@
 
   onMount(() => {
     window.addEventListener("scroll", onScroll, { passive: true });
-    const cached = arrival.viaHistory ? loadList(kind) : undefined;
+    if (kind === "other" && arrival.viaHistory) filter = loadOtherFilter() as Filter;
+    else saveOtherFilter("all");
+    const cached = arrival.viaHistory ? loadList(cacheKey()) : undefined;
     if (cached) {
       // Back from a visit: the same items and place as when we left.
       visits = cached.visits;
@@ -157,7 +193,7 @@
     return () => {
       stop();
       window.removeEventListener("scroll", onScroll);
-      if (loaded) saveList(kind, { visits, cursor, scrollY: lastY });
+      if (loaded) saveList(cacheKey(), { visits, cursor, scrollY: lastY });
     };
   });
 
@@ -192,8 +228,20 @@
     {/if}
   </div>
 
+  {#if kind === "other"}
+    <FilterChips options={FILTER_OPTIONS} value={FILTER_LABELS[filter]} onchange={chooseFilter} />
+  {/if}
+
   {#if $selection.on}
-    <SelectBar {kind} count={picked.length} busy={working} onmove={moveSelected} onzip={() => planZip({ visit_ids: picked })} />
+    <SelectBar
+      {kind}
+      {filter}
+      count={picked.length}
+      busy={working}
+      onmove={moveSelected}
+      onzip={() => planZip({ visit_ids: picked })}
+      ondelete={() => (confirmingDelete = true)}
+    />
   {/if}
 
   {#if kind === "birds" && newSpecies}
@@ -201,7 +249,7 @@
   {/if}
 
   {#if loaded && visits.length === 0}
-    <p class="empty">{EMPTY[kind]}</p>
+    <p class="empty">{kind === "other" ? FILTER_EMPTY[filter] : EMPTY[kind]}</p>
   {/if}
 
   <!-- Without the Mac's day (the status request failed) the headings and times fall back to plain dates. -->
@@ -239,6 +287,10 @@
     <button type="button" class="more" onclick={more} disabled={loading}>Show more</button>
   {/if}
 </div>
+
+{#if confirmingDelete}
+  <DeleteConfirm count={picked.length} ondelete={deleteSelected} ondone={() => (confirmingDelete = false)} />
+{/if}
 
 {#if zipPlan}
   <ZipConfirm info={zipPlan} ondone={() => (zipPlan = null)} />

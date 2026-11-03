@@ -19,6 +19,11 @@ export function loadList(kind: string): ListState | undefined {
   return lists.get(kind);
 }
 
+// The Other page's chosen filter, so Back from a visit lands on the same filter.
+let otherFilter = "all";
+export const saveOtherFilter = (f: string) => (otherFilter = f);
+export const loadOtherFilter = () => otherFilter;
+
 export function clearLists(): void {
   lists.clear();
 }

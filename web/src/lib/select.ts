@@ -1,8 +1,8 @@
 import { writable } from "svelte/store";
-import { send, type Category } from "./api";
+import { ApiError, send, type Category } from "./api";
 import { CATEGORY_NAMES, plural } from "./format";
 import { route } from "./router";
-import { noteChanged, showSaveFailure, showToast } from "./session";
+import { NETWORK_TEXT, noteChanged, showSaveFailure, showToast } from "./session";
 
 interface Selection {
   on: boolean;
@@ -51,5 +51,23 @@ export async function moveVisits(ids: number[], category: Category, name?: strin
     selection.clear();
   } catch (e) {
     showSaveFailure(e); // the picks stay, so the owner can try again
+  }
+}
+
+export const deletedText = (count: number) => `${plural(count, "empty clip")} deleted`;
+
+// Delete empty clips for good (the Mac refuses anything else). Returns true when they are gone.
+export async function deleteEmptyClips(ids: number[]): Promise<boolean> {
+  try {
+    const { deleted } = await send<{ deleted: number }>("POST", "/api/visits/delete", { visit_ids: ids });
+    showToast(deletedText(deleted));
+    noteChanged();
+    selection.clear();
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) showSaveFailure(e);
+    else if (e instanceof ApiError) showToast(e.status === 409 ? "Only empty clips can be deleted" : "Couldn't delete that. Try again.");
+    else showToast(NETWORK_TEXT);
+    return false; // the picks stay
   }
 }

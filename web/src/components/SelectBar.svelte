@@ -10,12 +10,16 @@
     busy = false,
     onmove,
     onzip,
+    filter = "all",
+    ondelete,
   }: {
     kind: Category | "favourites";
     count: number;
     busy?: boolean;
     onmove: (category: Category) => void;
     onzip: () => void;
+    filter?: "all" | "dogs" | "empty";
+    ondelete?: () => void;
   } = $props();
 
   const DOTS: Record<Category, string> = {
@@ -27,6 +31,8 @@
 
   // A category list offers the other two; Favourites mixes them all, so it offers all three.
   const targets = $derived(ALL.filter((c) => kind === "favourites" || c !== kind));
+  // Only empty clips can be deleted, and only by an editor.
+  const canDelete = $derived($canEdit && kind === "other" && filter === "empty" && !!ondelete);
   let moveOpen = $state(false);
   $effect(() => {
     void $wide;
@@ -55,6 +61,9 @@
     {:else if $canEdit}
       <button type="button" class="ghost" aria-expanded={moveOpen} disabled={count === 0} onclick={() => (moveOpen = !moveOpen)}>Move to…</button>
     {/if}
+    {#if canDelete}
+      <button type="button" class="delete" disabled={busy || count === 0} onclick={ondelete}>Delete</button>
+    {/if}
     <button type="button" class="zip" disabled={count === 0} onclick={onzip}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Download .zip
     </button>
@@ -75,6 +84,7 @@
     border-radius: 12px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
   }
   .ghost { border: 1px solid rgba(255, 255, 255, 0.45); background: transparent; color: #fff; }
+  .delete { border: none; background: var(--robin); color: #fff; }
   .zip { border: none; background: #fff; color: var(--robin-dark); }
   button:disabled { opacity: 0.5; cursor: default; }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6); }
