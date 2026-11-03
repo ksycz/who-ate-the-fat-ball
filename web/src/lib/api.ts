@@ -76,6 +76,14 @@ export interface Clip {
   preview_url: string | null;
 }
 
+export interface Guess {
+  scientific: string;
+  name: string | null;
+  confidence: number;
+}
+
+export type VisitDetail = Visit & { clips: Clip[]; guesses: Guess[] };
+
 export interface Camera {
   state: CameraState;
   last_seen_at: string | null;
@@ -84,6 +92,7 @@ export interface Camera {
 
 export interface Today {
   day: string;
+  now: string; // the Mac's clock when it answered, ISO with its UTC offset
   summary: { visits: number; species: number };
   champion: {
     scientific: string;
@@ -110,6 +119,7 @@ export interface Species {
 
 export interface Status {
   day: string;
+  now: string; // the Mac's clock when it answered, ISO with its UTC offset
   local: boolean; // the request comes from the Mac itself
   camera: Camera;
   sorted: { birds: number; other_animals: number; other: number; favourites: number };

@@ -26,6 +26,8 @@
     left: 12px;
     right: 12px;
     bottom: 14px;
+    box-sizing: border-box;
+    height: calc(var(--nav-phone-h) - 14px);
     z-index: 5;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -28,6 +28,7 @@ function visit(over: Partial<Visit> = {}): Visit {
 function today(over: Partial<TodayData> = {}): TodayData {
   return {
     day: "2026-11-03",
+    now: "2026-11-03T09:20:00+01:00",
     summary: { visits: 2, species: 2 },
     champion: { scientific: "Parus major", name: "great tit", count: 6, first_at: "2026-11-03T07:21:00+01:00", best_frame_url: "/media/frames/9.jpg" },
     new_species: null,
@@ -147,6 +148,21 @@ describe("Today", () => {
     expect(await screen.findByText("Checking who it is…")).toBeTruthy();
     expect(screen.getByText("Checking…")).toBeTruthy();
     expect(screen.getByText("▶ 0:09 · 1 clip")).toBeTruthy();
+  });
+
+  it("checking_card_is_not_a_link", async () => {
+    serve(today({ checking: [{ id: 4, begin_at: "2026-11-03T09:05:00+01:00", end_at: "2026-11-03T09:06:00+01:00", kind: "video", duration_s: 9, web_url: null, original_url: null, poster_url: null, preview_url: null }] }));
+    render(Today);
+    const name = await screen.findByText("Checking who it is…");
+    expect(name.closest("a")).toBeNull();
+  });
+
+  it("camera_minutes_come_from_the_servers_clock", async () => {
+    // This device thinks it is 12:00; the Mac says 09:20, so the camera (seen 09:15) was seen 5 minutes ago.
+    vi.setSystemTime(new Date(2026, 10, 3, 12, 0));
+    serve(today({ camera: { state: "ok", last_seen_at: "2026-11-03T09:15:00+01:00", last_error: null } }));
+    render(Today);
+    expect(await screen.findByText("Camera seen 5 min ago")).toBeTruthy();
   });
 
   it("retry_hidden_when_locked", async () => {

@@ -1,21 +1,14 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ApiError, getJSON, send, type Clip, type Visit } from "../lib/api";
+  import { ApiError, getJSON, send, type Guess, type VisitDetail } from "../lib/api";
   import { route, back } from "../lib/router";
   import { canEdit, changes, noteChanged, noteServerDay, serverDay, showSaveFailure, showToast } from "../lib/session";
-  import { correctionText, speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
+  import { correctionText, dayOf, speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "../components/Chip.svelte";
   import Picker from "../components/Picker.svelte";
 
-  interface Guess {
-    scientific: string;
-    name: string | null;
-    confidence: number;
-  }
-  type Detail = Visit & { clips: Clip[]; guesses: Guess[] };
-
-  let visit = $state<Detail | null>(null);
+  let visit = $state<VisitDetail | null>(null);
   let missing = $state(false);
   let failed = $state(false);
   let index = $state(0);
@@ -38,7 +31,7 @@
     index = 0;
     menuOpen = false;
     watchedSent = false;
-    getJSON<Detail>(`/api/visits/${current}`)
+    getJSON<VisitDetail>(`/api/visits/${current}`)
       .then((v) => {
         if (current === id) visit = v;
       })
@@ -50,7 +43,8 @@
   });
 
   const clip = $derived(visit?.clips[index] ?? null);
-  const today = $derived($serverDay ?? "");
+  // Until the Mac's day is known (the status request failed), judge by the visit's own date: the time still shows.
+  const today = $derived($serverDay ?? (visit ? dayOf(visit.started_at) : ""));
 
   $effect(() => {
     if ($serverDay === null) {
@@ -69,6 +63,8 @@
       reload();
     }
   });
+  // The Download menu only appears when there is a video or a photo to offer.
+  const downloadable = $derived(!!clip?.web_url || !!visit?.best_frame_url);
   const alternatives = $derived(visit?.guesses.slice(1, 3) ?? []);
 
   const percent = (g: Guess) => (sureChip(g.confidence) ?? "").replace(/ sure$/, "");
@@ -86,8 +82,11 @@
     }
   }
 
+  // The next clip that has a video or photo to show; clips still being converted are skipped.
   function onEnded() {
-    if (visit && index + 1 < visit.clips.length) play(index + 1);
+    if (!visit) return;
+    const next = visit.clips.findIndex((c, i) => i > index && c.web_url);
+    if (next !== -1) play(next);
   }
 
   function onPlay() {
@@ -98,9 +97,9 @@
     });
   }
 
-  async function reload(): Promise<Detail | null> {
+  async function reload(): Promise<VisitDetail | null> {
     try {
-      const fresh = await getJSON<Detail>(`/api/visits/${id}`);
+      const fresh = await getJSON<VisitDetail>(`/api/visits/${id}`);
       visit = fresh;
       return fresh;
     } catch {
@@ -207,7 +206,7 @@
       </div>
       <div class="meta-row">
         <div class="meta">
-          {#if $serverDay !== null}{visitTime(visit.started_at, visit.ended_at, today)}{/if}
+          {visitTime(visit.started_at, visit.ended_at, today)}
           {#if !visit.corrected && visit.species && sureChip(visit.confidence)}
             <Chip text={sureChip(visit.confidence) ?? ""} />
           {/if}
@@ -232,13 +231,15 @@
       {/if}
     </div>
 
-    <div class="actions" class:single={!$canEdit}>
+    {#if $canEdit || downloadable}
+    <div class="actions" class:single={!$canEdit || !downloadable}>
       {#if $canEdit}
         <button type="button" class="action" aria-pressed={visit.is_favourite} disabled={busy} onclick={toggleFavourite}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill={visit.is_favourite ? "var(--robin)" : "none"} stroke="var(--robin)" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"></path></svg>
           {visit.is_favourite ? "Favourite ✓" : "Favourite"}
         </button>
       {/if}
+      {#if downloadable}
       <div class="dl" bind:this={menuEl}>
         <button type="button" class="action" bind:this={dlButton} aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
@@ -255,7 +256,9 @@
           </div>
         {/if}
       </div>
+      {/if}
     </div>
+    {/if}
 
     {#if visit.clips.length > 0}
       <section class="clips">
@@ -282,7 +285,7 @@
   {/if}
 </div>
 
-{#if pickerOpen && visit && $canEdit}
+{#if pickerOpen && visit}
   <Picker {visit} onclose={closePicker} onchanged={() => reload()} />
 {/if}
 

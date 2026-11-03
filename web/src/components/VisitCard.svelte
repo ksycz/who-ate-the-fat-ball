@@ -4,14 +4,15 @@
   import { link } from "../lib/link";
   import Chip from "./Chip.svelte";
 
-  let { visit, today }: { visit: Visit; today: string } = $props();
+  // pending: the clip is still being recognised, so there is no visit page to open yet.
+  let { visit, today, pending = false }: { visit: Visit; today: string; pending?: boolean } = $props();
 
   const image = $derived(visit.best_frame_url ?? visit.poster_url);
   // "% sure" only means something for a species the app picked; a correction or no species has none.
   const chip = $derived(!visit.corrected && visit.species ? sureChip(visit.confidence) : null);
 </script>
 
-<a class="card" href="/visit/{visit.id}" use:link>
+{#snippet body()}
   <span class="photo">
     {#if image}
       <img src={image} alt="" loading="lazy" />
@@ -22,13 +23,19 @@
   </span>
   <span class="info">
     <span class="who">
-      <span class="name">{visitName(visit)}</span>
+      <span class="name">{pending ? "Checking who it is…" : visitName(visit)}</span>
       <span class="time">{visitTime(visit.started_at, visit.ended_at, today)}</span>
       {#if visit.corrected}<span class="time">Corrected by you</span>{/if}
     </span>
-    {#if chip}<Chip text={chip} />{/if}
+    {#if pending}<Chip text="Checking…" pending />{:else if chip}<Chip text={chip} />{/if}
   </span>
-</a>
+{/snippet}
+
+{#if pending}
+  <div class="card">{@render body()}</div>
+{:else}
+  <a class="card" href="/visit/{visit.id}" use:link>{@render body()}</a>
+{/if}
 
 <style>
   .card {

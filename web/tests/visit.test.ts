@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Visit from "../src/pages/Visit.svelte";
 import { route } from "../src/lib/router";
-import { canEdit, serverDay, toast } from "../src/lib/session";
-import type { Clip, Visit as VisitData } from "../src/lib/api";
-
-type Detail = VisitData & { clips: Clip[]; guesses: { scientific: string; name: string | null; confidence: number }[] };
+import { canEdit, NETWORK_TEXT, serverDay, toast } from "../src/lib/session";
+import type { Clip, VisitDetail as Detail } from "../src/lib/api";
 
 function clip(id: number, over: Partial<Clip> = {}): Clip {
   return {
@@ -52,15 +50,21 @@ function detail(over: Partial<Detail> = {}): Detail {
 let fetchMock: ReturnType<typeof vi.fn>;
 let current: Detail;
 let serverDayFromApi = "2026-11-03";
+let statusDown = false;
+let patchDown = false;
 function serve(data: Detail, patched?: Partial<Detail>) {
   current = data;
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/visits/5" && (!init || init.method === "GET")) return new Response(JSON.stringify(current), { status: 200 });
     if (url === "/api/visits/5" && init?.method === "PATCH") {
+      if (patchDown) throw new TypeError("Failed to fetch");
       current = { ...current, ...patched };
       return new Response(JSON.stringify({ undo_token: "tok1" }), { status: 200 });
     }
-    if (url === "/api/status") return new Response(JSON.stringify({ day: serverDayFromApi }), { status: 200 });
+    if (url === "/api/status") {
+      if (statusDown) throw new TypeError("Failed to fetch");
+      return new Response(JSON.stringify({ day: serverDayFromApi }), { status: 200 });
+    }
     if (url === "/api/visits/5/watched") return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
   });
@@ -72,6 +76,8 @@ function video(): HTMLVideoElement {
 }
 
 beforeEach(() => {
+  statusDown = false;
+  patchDown = false;
   canEdit.set(true);
   toast.set(null);
   serverDay.set("2026-11-03");
@@ -186,6 +192,64 @@ describe("Visit", () => {
     render(Visit);
     expect(await screen.findByText(/Yesterday 09:00 · stayed 2 min/)).toBeTruthy();
     vi.useRealTimers();
+  });
+
+  it("onended_skips_clips_that_are_not_ready", async () => {
+    serve(detail({ clips: [clip(1), clip(2, { web_url: null }), clip(3)] }));
+    render(Visit);
+    await screen.findByRole("heading", { name: "Great tit" });
+    await fireEvent(video(), new Event("ended"));
+    await waitFor(() => expect(video().getAttribute("src")).toBe("/media/web/3.mp4"));
+    const items = screen.getAllByRole("button", { name: /^Clip \d/ });
+    expect(items[2].getAttribute("aria-current")).toBe("true");
+  });
+
+  it("onended_stops_after_the_last_ready_clip", async () => {
+    serve(detail({ clips: [clip(1), clip(2, { web_url: null })] }));
+    render(Visit);
+    await screen.findByRole("heading", { name: "Great tit" });
+    await fireEvent(video(), new Event("ended"));
+    expect(video().getAttribute("src")).toBe("/media/web/1.mp4");
+  });
+
+  it("no_download_menu_without_a_video_or_a_photo", async () => {
+    serve(detail({ best_frame_url: null, clips: [clip(1, { web_url: null })] }));
+    render(Visit);
+    await screen.findByText("Video not ready yet");
+    expect(screen.queryByRole("button", { name: /Download/ })).toBeNull();
+  });
+
+  it("download_menu_stays_for_a_photo_alone", async () => {
+    serve(detail({ clips: [clip(1, { web_url: null })] }));
+    render(Visit);
+    await fireEvent.click(await screen.findByRole("button", { name: /Download/ }));
+    expect(screen.queryByRole("link", { name: "Video (.mp4)" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Photo (.jpg)" })).toBeTruthy();
+  });
+
+  it("failed_patch_toast_says_check_the_wifi_on_a_network_error", async () => {
+    serve(detail());
+    patchDown = true;
+    render(Visit);
+    await fireEvent.click(await screen.findByRole("button", { name: "Blue tit · 4%" }));
+    await waitFor(() => expect(get(toast)).toEqual({ text: NETWORK_TEXT }));
+  });
+
+  it("time_line_shows_when_the_status_request_fails", async () => {
+    serverDay.set(null);
+    statusDown = true;
+    serve(detail());
+    render(Visit);
+    // No server day to judge by, so the visit's own date stands in: the time and stay still show.
+    expect(await screen.findByText(/09:00 · stayed 2 min/)).toBeTruthy();
+  });
+
+  it("or_maybe_is_hidden_on_a_corrected_visit", async () => {
+    serve(detail({ corrected: true }));
+    render(Visit);
+    await screen.findByText("Corrected by you");
+    expect(screen.queryByText("Or maybe")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Blue tit/ })).toBeNull();
   });
 
   it("escape_closes_download_menu_and_returns_focus", async () => {

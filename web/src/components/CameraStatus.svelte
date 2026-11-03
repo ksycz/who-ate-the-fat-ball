@@ -1,10 +1,14 @@
 <script lang="ts">
   import type { Camera } from "../lib/api";
+  import { tick } from "../lib/clock";
   import { cameraStatus } from "../lib/format";
 
-  let { camera, now, today, short = false }: { camera: Camera; now: Date; today: string; short?: boolean } = $props();
+  // serverNow is the Mac's clock in the reply and fetchedAt is when this device got it; the minutes keep counting from there.
+  let { camera, today, serverNow, fetchedAt, short = false }: {
+    camera: Camera; today: string; serverNow: string; fetchedAt: number; short?: boolean;
+  } = $props();
 
-  const s = $derived(cameraStatus(camera, now, today));
+  const s = $derived(cameraStatus(camera, today, { serverNow, fetchedAt, nowMs: $tick }));
   // The short form drops the "Check App status" hint; the problem notice carries it instead.
   const text = $derived(short && s.dot === "problem" ? "Camera not seen" : s.text);
 </script>

@@ -22,13 +22,6 @@ function wallMs(w: Wall): number {
   return Date.UTC(w.y, w.m - 1, w.d, w.hh, w.mm, w.ss);
 }
 
-function nowWall(now: Date): Wall {
-  return {
-    y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate(),
-    hh: now.getHours(), mm: now.getMinutes(), ss: now.getSeconds(),
-  };
-}
-
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (w: Wall) => `${pad(w.hh)}:${pad(w.mm)}`;
@@ -98,20 +91,38 @@ export function visitName(visit: Visit): string {
   return "Unknown";
 }
 
+// Whole minutes from `at` to now, by the server's clock: the time it gave us (`serverNow`, read at
+// `fetchedAt` by this device's clock) plus however long this device has waited since (`nowMs`).
+// Only differences between two readings of the same clock are used, so a wrong browser date changes nothing.
+export function minutesAgo(at: string, serverNow: string, fetchedAt: number, nowMs: number): number {
+  const sinceReply = Math.max(0, nowMs - fetchedAt);
+  const ms = wallMs(parseWall(serverNow)) + sinceReply - wallMs(parseWall(at));
+  return Math.max(0, Math.floor(ms / 60000));
+}
+
+export interface ServerClock {
+  serverNow: string;
+  fetchedAt: number;
+  nowMs: number;
+}
+
 export function cameraStatus(
   camera: Status["camera"],
-  now: Date,
   today: string,
+  clockNow: ServerClock,
 ): { dot: "ok" | "asleep" | "problem"; text: string } {
   const dot = camera.state;
   const seen = camera.last_seen_at ? parseWall(camera.last_seen_at) : null;
   if (dot === "ok") {
-    if (!seen) return { dot, text: "Camera seen just now" };
-    const minutes = Math.floor((wallMs(nowWall(now)) - wallMs(seen)) / 60000);
+    if (!camera.last_seen_at) return { dot, text: "Camera seen just now" };
+    const minutes = minutesAgo(camera.last_seen_at, clockNow.serverNow, clockNow.fetchedAt, clockNow.nowMs);
     return { dot, text: minutes < 1 ? "Camera seen just now" : `Camera seen ${minutes} min ago` };
   }
   if (dot === "asleep") {
-    return { dot, text: seen ? `Camera asleep · seen ${clock(seen)}` : "Camera asleep" };
+    if (!seen) return { dot, text: "Camera asleep" };
+    const when = dayLabel(seen, today);
+    if (when === "today") return { dot, text: `Camera asleep · seen ${clock(seen)}` };
+    return { dot, text: `Camera asleep · since ${when === "yesterday" ? `yesterday ${clock(seen)}` : `${seen.d} ${MONTHS[seen.m - 1]}`}` };
   }
   if (!seen) return { dot, text: "Camera not seen yet · Check App status" };
   const when = dayLabel(seen, today);

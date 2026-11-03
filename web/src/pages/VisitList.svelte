@@ -149,24 +149,26 @@
     <p class="empty">{EMPTY[kind]}</p>
   {/if}
 
-  {#if $serverDay !== null}
-    {#each groups as group (group.day)}
-      <section>
-        <h2>{dayHeading(group.day, $serverDay)}</h2>
-        <div class="cards">
-          {#each group.visits as visit (visit.id)}
-            <VisitCard {visit} today={$serverDay} />
-          {/each}
-        </div>
-      </section>
-    {/each}
-  {/if}
+  <!-- Without the Mac's day (the status request failed) the headings and times fall back to plain dates. -->
+  {#each groups as group (group.day)}
+    <section>
+      <h2>{dayHeading(group.day, $serverDay ?? "")}</h2>
+      <div class="cards">
+        {#each group.visits as visit (visit.id)}
+          <VisitCard {visit} today={$serverDay ?? ""} />
+        {/each}
+      </div>
+    </section>
+  {/each}
 
   {#if failed}
-    <p class="note">Couldn't load visits. Check the Wi-Fi and try again.</p>
+    <div class="failed">
+      <p class="note">Couldn't load visits. Check the Wi-Fi and try again.</p>
+      <button type="button" class="more" onclick={() => loadPage(cursor)}>Try again</button>
+    </div>
   {/if}
 
-  {#if cursor !== null}
+  {#if cursor !== null && !failed}
     <div class="sentinel" bind:this={sentinel}></div>
     <button type="button" class="more" onclick={more} disabled={loading}>Show more</button>
   {/if}
@@ -181,6 +183,7 @@
     margin: 0; padding: 28px 20px; border-radius: 18px; background: #fff;
     text-align: center; font-size: 15px; color: var(--ink-2);
   }
+  .failed { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   .note { margin: 0; font-size: 13px; color: var(--ink-2); }
   .sentinel { height: 1px; }
   .more {

@@ -20,6 +20,8 @@
   --dot-animals: #8fa6b4;
   --dot-other: #c9bba8;
   --ok: #2e8b57;
+  /* How far up the phone bar's top edge sits from the bottom of the screen (14px gap + the bar). Toasts rest above it. */
+  --nav-phone-h: 80px;
 }
 
 body {
