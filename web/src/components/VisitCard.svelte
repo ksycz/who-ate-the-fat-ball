@@ -1,11 +1,19 @@
 <script lang="ts">
   import type { Visit } from "../lib/api";
-  import { clipBadge, sureChip, visitName, visitTime } from "../lib/format";
+  import { clipBadge, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "./Chip.svelte";
 
   // pending: the clip is still being recognised, so there is no visit page to open yet.
-  let { visit, today, pending = false }: { visit: Visit; today: string; pending?: boolean } = $props();
+  // selecting: select mode, where the card is a checkbox and its link is inert.
+  let {
+    visit,
+    today,
+    pending = false,
+    selecting = false,
+    selected = false,
+    onselect,
+  }: { visit: Visit; today: string; pending?: boolean; selecting?: boolean; selected?: boolean; onselect?: () => void } = $props();
 
   const image = $derived(visit.best_frame_url ?? visit.poster_url);
   // "% sure" only means something for a species the app picked; a correction or no species has none.
@@ -31,7 +39,22 @@
   </span>
 {/snippet}
 
-{#if pending}
+{#if selecting}
+  <!-- The checkbox is the control; a tap anywhere else on the card toggles it too. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div
+    class="card selecting"
+    class:selected
+    onclick={(e) => {
+      if (!(e.target as HTMLElement).closest("label")) onselect?.();
+    }}
+  >
+    {@render body()}
+    <label class="pick">
+      <input type="checkbox" checked={selected} onchange={() => onselect?.()} aria-label="Select {visitName(visit)} at {timeOfDay(visit.started_at)}" />
+    </label>
+  </div>
+{:else if pending}
   <div class="card">{@render body()}</div>
 {:else}
   <a class="card" href="/visit/{visit.id}" use:link>{@render body()}</a>
@@ -46,6 +69,13 @@
     overflow: hidden;
     color: var(--ink);
   }
+  .card.selecting { position: relative; cursor: pointer; }
+  .card.selected { outline: 3px solid var(--robin); outline-offset: -3px; }
+  .pick {
+    position: absolute; left: 8px; top: 8px; display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 12px; background: rgba(255, 255, 255, 0.94); cursor: pointer;
+  }
+  .pick input { width: 22px; height: 22px; accent-color: var(--robin); }
   .photo {
     position: relative;
     display: block;

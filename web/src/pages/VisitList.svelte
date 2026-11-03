@@ -1,12 +1,16 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { getJSON, type Today, type Visit } from "../lib/api";
-  import { dayHeading, dayOf } from "../lib/format";
-  import { changes, noteServerDay, serverDay } from "../lib/session";
+  import { ApiError, getJSON, type Category, type Today, type Visit } from "../lib/api";
+  import { dayHeading, dayOf, visitName } from "../lib/format";
+  import { moveVisits, selection } from "../lib/select";
+  import { changes, noteServerDay, serverDay, showToast } from "../lib/session";
+  import { askZip, type ZipPlan, type ZipRequest } from "../lib/zip";
   import { loadList, saveList } from "../lib/listCache";
   import { arrival } from "../lib/router";
   import NewSpeciesBanner from "../components/NewSpeciesBanner.svelte";
+  import SelectBar from "../components/SelectBar.svelte";
   import VisitCard from "../components/VisitCard.svelte";
+  import ZipConfirm from "../components/ZipConfirm.svelte";
 
   type Kind = "birds" | "other_animals" | "other" | "favourites";
   let { kind }: { kind: Kind } = $props();
@@ -32,6 +36,8 @@
   let failed = $state(false);
   let newSpecies = $state<Today["new_species"]>(null);
   let sentinel = $state<HTMLElement | null>(null);
+  let zipPlan = $state<ZipPlan | null>(null);
+  let working = $state(false); // a move or a zip request is on its way
   let generation = 0; // bumped on every reload so a slow older response is dropped
 
   function url(after: string | null): string {
@@ -84,6 +90,36 @@
     }
     return out;
   });
+
+  const picked = $derived([...$selection.ids]);
+
+  async function moveSelected(category: Category) {
+    if (working || picked.length === 0) return;
+    working = true;
+    const only = picked.length === 1 ? visits.find((v) => v.id === picked[0]) : undefined;
+    await moveVisits(picked, category, only ? visitName(only) : undefined);
+    working = false;
+  }
+
+  // Ask the Mac how big the .zip is; the owner then confirms before anything downloads.
+  async function planZip(body: ZipRequest) {
+    if (working) return;
+    working = true;
+    try {
+      zipPlan = await askZip(body);
+    } catch (e) {
+      showToast(
+        e instanceof ApiError && (e.status === 422 || e.status === 404)
+          ? e.detail
+          : "Couldn't prepare the download. Check the Wi-Fi and try again.",
+      );
+    } finally {
+      working = false;
+    }
+  }
+
+  const zipDay = (day: string) =>
+    planZip(kind === "favourites" ? { day, favourite: true } : { day, category: kind });
 
   let firstChange = true;
   let lastY = 0;
@@ -138,8 +174,27 @@
   });
 </script>
 
-<div class="list">
-  <h1>{TITLES[kind]}</h1>
+<div class="list" class:selecting={$selection.on}>
+  <div class="head">
+    <h1>{TITLES[kind]}</h1>
+    {#if loaded && visits.length > 0}
+      <div class="tools">
+        {#if $selection.on}
+          <button type="button" class="tool" onclick={() => selection.selectAll(visits.map((v) => v.id))}>Select all</button>
+        {/if}
+        <button
+          type="button"
+          class="tool"
+          aria-pressed={$selection.on}
+          onclick={() => ($selection.on ? selection.clear() : selection.enter())}
+        >{$selection.on ? "Done" : "Select"}</button>
+      </div>
+    {/if}
+  </div>
+
+  {#if $selection.on}
+    <SelectBar {kind} count={picked.length} busy={working} onmove={moveSelected} onzip={() => planZip({ visit_ids: picked })} />
+  {/if}
 
   {#if kind === "birds" && newSpecies}
     <NewSpeciesBanner species={newSpecies} placement="birds" />
@@ -152,10 +207,21 @@
   <!-- Without the Mac's day (the status request failed) the headings and times fall back to plain dates. -->
   {#each groups as group (group.day)}
     <section>
-      <h2>{dayHeading(group.day, $serverDay ?? "")}</h2>
+      <div class="day">
+        <h2>{dayHeading(group.day, $serverDay ?? "")}</h2>
+        <button type="button" class="day-zip" disabled={working} onclick={() => zipDay(group.day)}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Download this day (.zip)
+        </button>
+      </div>
       <div class="cards">
         {#each group.visits as visit (visit.id)}
-          <VisitCard {visit} today={$serverDay ?? ""} />
+          <VisitCard
+            {visit}
+            today={$serverDay ?? ""}
+            selecting={$selection.on}
+            selected={$selection.ids.has(visit.id)}
+            onselect={() => selection.toggle(visit.id)}
+          />
         {/each}
       </div>
     </section>
@@ -174,11 +240,25 @@
   {/if}
 </div>
 
+{#if zipPlan}
+  <ZipConfirm info={zipPlan} ondone={() => (zipPlan = null)} />
+{/if}
+
 <style>
   .list { display: flex; flex-direction: column; gap: 14px; padding: 18px 0 20px; }
+  .list.selecting { padding-bottom: 150px; } /* room for the bar over the last card */
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h1 { margin: 0; font-weight: 800; font-size: 34px; letter-spacing: -0.8px; }
+  .tools { display: flex; gap: 8px; }
+  .tool {
+    min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line-strong); background: #fff;
+    color: var(--robin-dark); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .tool[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
   section { display: flex; flex-direction: column; gap: 14px; }
+  .day { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   h2 { margin: 6px 0 0; font-weight: 600; font-size: 15px; color: var(--ink-2); }
+  .day-zip { display: none; }
   .empty {
     margin: 0; padding: 28px 20px; border-radius: 18px; background: #fff;
     text-align: center; font-size: 15px; color: var(--ink-2);
@@ -195,6 +275,12 @@
   .cards { display: flex; flex-direction: column; gap: 14px; }
   @media (min-width: 768px) {
     .list { padding-top: 0; }
+    .list.selecting { padding-bottom: 20px; }
+    .day-zip {
+      display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: none; border-radius: 10px;
+      background: transparent; color: var(--robin-dark); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .day-zip:disabled { opacity: 0.6; cursor: default; }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
   }
 </style>

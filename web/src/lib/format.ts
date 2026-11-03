@@ -169,3 +169,11 @@ export function correctionText(from: Category, to: Category, label: string): str
 
 // "1 visit", "2 visits".
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// "820 KB", "14.2 MB", "1.3 GB": a file size in words (1 decimal from 1 MB).
+export function sizeText(bytes: number): string {
+  const KB = 1024;
+  if (bytes < KB ** 2) return `${Math.max(0, Math.ceil(bytes / KB))} KB`;
+  if (bytes < KB ** 3) return `${(bytes / KB ** 2).toFixed(1)} MB`;
+  return `${(bytes / KB ** 3).toFixed(1)} GB`;
+}

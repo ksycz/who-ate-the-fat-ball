@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Visit } from "../src/lib/api";
-import { cameraStatus, dayHeading, minutesAgo, clipBadge, durationText, sureChip, visitName, visitTime } from "../src/lib/format";
+import { cameraStatus, dayHeading, minutesAgo, clipBadge, durationText, sizeText, sureChip, visitName, visitTime } from "../src/lib/format";
 
 const TODAY = "2026-11-02";
 
@@ -170,5 +170,17 @@ describe("plural and correctionText", () => {
     expect(correctionText("birds", "other", "Dog")).toBe("Moved to Other");
     expect(correctionText("birds", "other_animals", "x")).toBe("Moved to Other animals");
     expect(correctionText("birds", "birds", "Blue tit")).toBe("Changed to Blue tit");
+  });
+});
+
+describe("sizeText", () => {
+  it("uses KB below 1 MB, one decimal from 1 MB", () => {
+    expect(sizeText(820 * 1024)).toBe("820 KB");
+    expect(sizeText(14.2 * 1024 * 1024)).toBe("14.2 MB");
+    expect(sizeText(1.3 * 1024 ** 3)).toBe("1.3 GB");
+  });
+  it("copes with tiny sizes", () => {
+    expect(sizeText(0)).toBe("0 KB");
+    expect(sizeText(300)).toBe("1 KB");
   });
 });
