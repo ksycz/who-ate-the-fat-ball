@@ -14,18 +14,16 @@
   ];
 
   let picked = $state<string | null>(null);
-  let detail = $state(HINT);
+  let pickedText = $state(HINT);
+  let focusedText = $state<string | null>(null);
+  const detail = $derived(focusedText ?? pickedText);
   const max = $derived(Math.max(0, ...heatmap.flatMap((r) => r.cells)));
   let grid: HTMLElement | undefined = $state();
 
   function pick(key: string, text: string) {
-    if (picked === key) {
-      picked = null;
-      detail = HINT;
-    } else {
-      picked = key;
-      detail = text;
-    }
+    picked = picked === key ? null : key;
+    pickedText = picked ? text : HINT;
+    focusedText = null;
   }
 
   // Arrow keys move between squares.
@@ -64,8 +62,8 @@
             class:on={picked === key}
             style="background: {colour.bg}; border-color: {colour.border}"
             onclick={() => pick(key, text)}
-            onfocus={() => (detail = text)}
-            onblur={() => (detail = picked ? detail : HINT)}
+            onfocus={() => (focusedText = text)}
+            onblur={() => (focusedText = null)}
             onkeydown={(e) => keydown(e, r, c)}
           ></button>
         </span>
