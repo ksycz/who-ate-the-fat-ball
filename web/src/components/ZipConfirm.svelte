@@ -10,7 +10,11 @@
   let dialog = $state<HTMLElement | null>(null);
   let downloadButton = $state<HTMLButtonElement | null>(null);
 
-  onMount(() => downloadButton?.focus());
+  onMount(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    downloadButton?.focus();
+    return () => opener?.focus?.(); // back to the button that opened this
+  });
 
   function download() {
     startDownload(info.token, info.filename);
@@ -19,11 +23,6 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      ondone();
-      return;
-    }
     if (e.key !== "Tab" || !dialog) return;
     const items = [...dialog.querySelectorAll<HTMLElement>("button:not([disabled])")];
     const first = items[0];
@@ -38,6 +37,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={(e) => e.key === "Escape" && ondone()} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={(e) => e.target === e.currentTarget && ondone()}>

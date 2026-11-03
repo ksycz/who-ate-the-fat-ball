@@ -170,10 +170,12 @@ export function correctionText(from: Category, to: Category, label: string): str
 // "1 visit", "2 visits".
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// "820 KB", "14.2 MB", "1.3 GB": a file size in words (1 decimal from 1 MB).
+// "820 KB", "14.2 MB", "1.3 GB": a file size in words, decimal units like Finder (1 decimal from 1 MB).
+// The unit is picked after rounding, so 999,999 bytes is "1.0 MB", not "1000 KB".
 export function sizeText(bytes: number): string {
-  const KB = 1024;
-  if (bytes < KB ** 2) return `${Math.max(0, Math.ceil(bytes / KB))} KB`;
-  if (bytes < KB ** 3) return `${(bytes / KB ** 2).toFixed(1)} MB`;
-  return `${(bytes / KB ** 3).toFixed(1)} GB`;
+  const kb = Math.ceil(bytes / 1e3);
+  if (kb < 1000) return `${Math.max(0, kb)} KB`;
+  const mb = (bytes / 1e6).toFixed(1);
+  if (Number(mb) < 1000) return `${mb} MB`;
+  return `${(bytes / 1e9).toFixed(1)} GB`;
 }

@@ -1,8 +1,8 @@
-import { send } from "./api";
+import { send, type Category } from "./api";
 
 export type ZipRequest =
   | { visit_ids: number[] }
-  | { day: string; category?: string; favourite?: true };
+  | { day: string; category?: Category; favourite?: true };
 
 export interface ZipPlan {
   token: string;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Category } from "../lib/api";
+  import { wide } from "../lib/media";
   import { CATEGORY_NAMES, plural } from "../lib/format";
   import { canEdit } from "../lib/session";
 
@@ -31,7 +32,7 @@
 
 <div class="bar" role="region" aria-label="Selected visits">
   <span class="count">{plural(count, "visit")} selected</span>
-  {#if moveOpen && $canEdit}
+  {#if $canEdit && !$wide && moveOpen}
     <div class="targets" role="group" aria-label="Move to">
       {#each targets as c (c)}
         <button type="button" class="ghost" disabled={busy || count === 0} onclick={() => onmove(c)}>
@@ -41,7 +42,13 @@
     </div>
   {/if}
   <div class="actions">
-    {#if $canEdit}
+    {#if $canEdit && $wide}
+      {#each targets as c (c)}
+        <button type="button" class="ghost" disabled={busy || count === 0} onclick={() => onmove(c)}>
+          <span class="dot" style:background={DOTS[c]}></span>Move to {CATEGORY_NAMES[c]}
+        </button>
+      {/each}
+    {:else if $canEdit}
       <button type="button" class="ghost" aria-expanded={moveOpen} disabled={count === 0} onclick={() => (moveOpen = !moveOpen)}>Move to…</button>
     {/if}
     <button type="button" class="zip" disabled={count === 0} onclick={onzip}>
@@ -73,7 +80,6 @@
       align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px 12px 18px; border-radius: 16px;
     }
     .count { padding: 0; font-size: 15px; }
-    .targets { flex-direction: row; order: 2; }
     .actions { order: 3; display: flex; gap: 10px; }
     button { min-height: 44px; font-size: 14px; }
   }

@@ -20,8 +20,7 @@ test("move two visits from Birds to Other, then Undo", async ({ page, request })
   await boxes.nth(0).check();
   await boxes.nth(1).check();
   await expect(page.getByText("2 visits selected")).toBeVisible();
-  await page.getByRole("button", { name: "Move to…" }).click();
-  await page.getByRole("group", { name: "Move to" }).getByRole("button", { name: "Other", exact: true }).click();
+  await page.getByRole("button", { name: "Move to Other", exact: true }).click();
   const toast = page.getByRole("status").filter({ hasText: "2 visits moved to Other" });
   await expect(toast).toBeVisible();
   await expect(page.getByText("2 visits selected")).toBeHidden();

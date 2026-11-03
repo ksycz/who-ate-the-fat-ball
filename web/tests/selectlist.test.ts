@@ -19,7 +19,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (url === "/api/downloads/zip") {
       return new Response(
-        JSON.stringify({ token: "t", size_bytes: 2048, visits: 2, files: 2, filename: "fat-ball-2-visits.zip" }),
+        JSON.stringify({ token: "t", size_bytes: 2000, visits: 2, files: 2, filename: "fat-ball-2-visits.zip" }),
         { status: 200 },
       );
     }

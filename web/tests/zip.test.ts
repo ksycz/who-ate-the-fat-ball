@@ -39,7 +39,7 @@ describe("startDownload", () => {
 });
 
 describe("ZipConfirm", () => {
-  const info = { token: "abc", size_bytes: 14.2 * 1024 * 1024, visits: 3, filename: "fat-ball-3-visits.zip" };
+  const info = { token: "abc", size_bytes: 14_200_000, visits: 3, filename: "fat-ball-3-visits.zip" };
 
   it("asks with the count and size", () => {
     render(ZipConfirm, { info, ondone: () => {} });
@@ -48,7 +48,7 @@ describe("ZipConfirm", () => {
   });
 
   it("uses the singular for one visit", () => {
-    render(ZipConfirm, { info: { ...info, visits: 1, size_bytes: 820 * 1024 }, ondone: () => {} });
+    render(ZipConfirm, { info: { ...info, visits: 1, size_bytes: 820_000 }, ondone: () => {} });
     expect(screen.getByText("Download 1 visit (820 KB)?")).toBeTruthy();
   });
 
@@ -69,6 +69,24 @@ describe("ZipConfirm", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(click).not.toHaveBeenCalled();
     expect(get(toast)).toBeNull();
+    expect(ondone).toHaveBeenCalled();
+  });
+
+  it("gives focus back to the button that opened it", async () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { unmount } = render(ZipConfirm, { info, ondone: () => {} });
+    expect(document.activeElement).not.toBe(opener);
+    unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("Esc closes it", async () => {
+    const ondone = vi.fn();
+    render(ZipConfirm, { info, ondone });
+    await fireEvent.keyDown(window, { key: "Escape" });
     expect(ondone).toHaveBeenCalled();
   });
 });

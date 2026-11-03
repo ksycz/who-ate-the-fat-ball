@@ -129,9 +129,35 @@ describe("SelectBar", () => {
     canEdit.set(true);
     render(SelectBar, { kind: "favourites", count: 2, onmove: () => {}, onzip: () => {} });
     await fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
-    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(
-      expect.arrayContaining(["Birds", "Other animals", "Other"]),
-    );
+    const group = screen.getByRole("group", { name: "Move to" });
+    expect([...group.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Birds", "Other animals", "Other"]);
+  });
+
+  describe("on a wide screen", () => {
+    beforeEach(() => {
+      vi.stubGlobal("matchMedia", (q: string) => ({
+        matches: true, media: q, addEventListener() {}, removeEventListener() {},
+      }));
+    });
+
+    it("shows direct Move to buttons with no toggle", async () => {
+      canEdit.set(true);
+      const onmove = vi.fn();
+      render(SelectBar, { kind: "birds", count: 2, onmove, onzip: () => {} });
+      expect(screen.queryByRole("button", { name: "Move to…" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "Move to" })).toBeNull();
+      expect(document.querySelector("[aria-expanded]")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Move to Birds" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Move to Other animals" })).toBeTruthy();
+      await fireEvent.click(screen.getByRole("button", { name: "Move to Other" }));
+      expect(onmove).toHaveBeenCalledWith("other");
+    });
+
+    it("hides Move when locked", () => {
+      canEdit.set(false);
+      render(SelectBar, { kind: "birds", count: 2, onmove: () => {}, onzip: () => {} });
+      expect(screen.queryByRole("button", { name: /Move to/ })).toBeNull();
+    });
   });
 
   it("Download .zip calls onzip", async () => {

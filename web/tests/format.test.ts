@@ -174,10 +174,14 @@ describe("plural and correctionText", () => {
 });
 
 describe("sizeText", () => {
-  it("uses KB below 1 MB, one decimal from 1 MB", () => {
-    expect(sizeText(820 * 1024)).toBe("820 KB");
-    expect(sizeText(14.2 * 1024 * 1024)).toBe("14.2 MB");
-    expect(sizeText(1.3 * 1024 ** 3)).toBe("1.3 GB");
+  it("is decimal: KB below 1 MB, one decimal from 1 MB", () => {
+    expect(sizeText(820_000)).toBe("820 KB");
+    expect(sizeText(14_200_000)).toBe("14.2 MB");
+    expect(sizeText(1_300_000_000)).toBe("1.3 GB");
+  });
+  it("picks the unit after rounding", () => {
+    expect(sizeText(999_999)).toBe("1.0 MB");
+    expect(sizeText(999_960_000)).toBe("1.0 GB");
   });
   it("copes with tiny sizes", () => {
     expect(sizeText(0)).toBe("0 KB");
