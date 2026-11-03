@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StringConstraints
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Match
 
 from fatball import secrets as camera_secrets
 from fatball.api import auth as auth_mod
@@ -156,6 +159,10 @@ def create_app(
             "last_error": cam.last_error if cam else None,
         }
 
+    def now_json() -> str:
+        """The server's time with its UTC offset, so the browser can tell how far its own clock is off."""
+        return now().astimezone().isoformat(timespec="seconds")
+
     def can_retry(clip: repo.Clip) -> bool:
         """A ready clip can be recognised again; a failed one can be converted again while its raw file exists."""
         if clip.status == "ready":
@@ -167,6 +174,7 @@ def create_app(
         free = shutil.disk_usage(settings.data_dir).free
         return {
             "day": now().astimezone().date().isoformat(),
+            "now": now_json(),
             "local": auth_mod.is_local(request),
             "camera": camera_json(conn),
             "sorted": repo.sorted_counts(conn),
@@ -183,6 +191,7 @@ def create_app(
         champ = today.champion(conn, day)
         return {
             "day": day.isoformat(),
+            "now": now_json(),
             "summary": today.summary(conn, day),
             "champion": (
                 {**{k: v for k, v in champ.items() if k != "best_frame_path"},
@@ -190,7 +199,7 @@ def create_app(
                 if champ else None
             ),
             "new_species": today.new_species(conn),
-            "visits": [_visit_json(r) for r in repo.list_visits(conn, 100_000, day=day)],
+            "visits": [_visit_json(r) for r in repo.list_visits(conn, None, day=day)],
             "checking": [_clip_json(c) for c in today.checking(conn, day)],
             "failed": [
                 {"clip_id": c.id, "begin_at": c.begin_at.isoformat(), "can_retry": can_retry(c)}
@@ -337,6 +346,15 @@ def create_app(
     # The gallery: registered after every API route so /api/* and /media/* 404s stay JSON.
     static_root = (static_dir or STATIC_DIR).resolve()
     app.mount("/assets", StaticFiles(directory=static_root / "assets", check_dir=False), name="assets")
+
+    @app.exception_handler(405)
+    async def method_not_allowed(request: Request, exc: StarletteHTTPException):
+        """Only the GET-only gallery fallback matched this path: the URL is unknown, so a JSON 404.
+        A wrong method on a real route stays a 405."""
+        for route in app.routes:
+            if getattr(route, "path", None) != "/{path:path}" and route.matches(request.scope)[0] != Match.NONE:
+                return await http_exception_handler(request, exc)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
 
     @app.get("/{path:path}", include_in_schema=False)
     def gallery(path: str):

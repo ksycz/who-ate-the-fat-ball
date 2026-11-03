@@ -56,11 +56,11 @@ class Camera:
     clock_offset_s: float | None
 
 
-def _iso(dt: datetime) -> str:
+def iso(dt: datetime) -> str:
     return dt.astimezone().isoformat()
 
 
-def _clip(row: sqlite3.Row) -> Clip:
+def row_to_clip(row: sqlite3.Row) -> Clip:
     values = {f.name: row[f.name] for f in fields(Clip)}
     values["begin_at"] = datetime.fromisoformat(values["begin_at"])
     values["end_at"] = datetime.fromisoformat(values["end_at"])
@@ -101,7 +101,7 @@ def update_camera_status(
 ) -> None:
     """Set the given fields; arguments left as None are not touched. clear_error sets last_error NULL."""
     given = {
-        "last_seen_at": _iso(last_seen_at) if isinstance(last_seen_at, datetime) else last_seen_at,
+        "last_seen_at": iso(last_seen_at) if isinstance(last_seen_at, datetime) else last_seen_at,
         "last_ip": last_ip,
         "last_error": last_error,
         "clock_offset_s": clock_offset_s,
@@ -132,7 +132,7 @@ def add_clip(
     cur = conn.execute(
         "INSERT OR IGNORE INTO clip(camera_id, sd_path, begin_at, end_at, kind, size_bytes, status) "
         "VALUES (?, ?, ?, ?, ?, ?, 'downloading')",
-        (camera_id, sd_path, _iso(begin_at), _iso(end_at), kind, size_bytes),
+        (camera_id, sd_path, iso(begin_at), iso(end_at), kind, size_bytes),
     )
     conn.commit()
     return cur.lastrowid if cur.rowcount else None
@@ -167,7 +167,7 @@ def claim_for_processing(conn: sqlite3.Connection, clip_id: int) -> Clip | None:
     if cur.rowcount != 1:
         return None
     row = conn.execute("SELECT * FROM clip WHERE id = ?", (clip_id,)).fetchone()
-    return _clip(row) if row is not None else None
+    return row_to_clip(row) if row is not None else None
 
 
 def known_clip_keys(conn: sqlite3.Connection, day: date) -> set[tuple[str, datetime]]:
@@ -191,7 +191,7 @@ def set_clip_status(conn: sqlite3.Connection, clip_id: int, status: Status, **pa
 
 def clips_with_status(conn: sqlite3.Connection, status: str) -> list[Clip]:
     rows = conn.execute("SELECT * FROM clip WHERE status = ? ORDER BY begin_at, id", (status,))
-    return [_clip(r) for r in rows]
+    return [row_to_clip(r) for r in rows]
 
 
 def list_clips(
@@ -201,13 +201,13 @@ def list_clips(
     where, args = [], []
     if before is not None:
         where.append("begin_at < ?")
-        args.append(_iso(before))
+        args.append(iso(before))
     if status is not None:
         where.append("status = ?")
         args.append(status)
     clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
     rows = conn.execute(f"SELECT * FROM clip {clause}ORDER BY begin_at DESC, id DESC LIMIT ?", (*args, limit))
-    return [_clip(r) for r in rows]
+    return [row_to_clip(r) for r in rows]
 
 
 def queue_counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -319,14 +319,14 @@ def set_recognition(
     conn.execute(
         "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL, "
         "recognition_wanted = 0 WHERE id = ?",
-        (best_frame_path, verdict_json, _iso(recognized_at), clip_id),
+        (best_frame_path, verdict_json, iso(recognized_at), clip_id),
     )
     conn.commit()
 
 
 def get_clip(conn: sqlite3.Connection, clip_id: int) -> Clip | None:
     row = conn.execute("SELECT * FROM clip WHERE id = ?", (clip_id,)).fetchone()
-    return _clip(row) if row is not None else None
+    return row_to_clip(row) if row is not None else None
 
 
 def is_recognized(conn: sqlite3.Connection, clip_id: int) -> bool:
@@ -352,7 +352,7 @@ def label_detections(conn: sqlite3.Connection, clip_id: int, label: str, source:
         "UPDATE detection SET label = ?, labelled_at = ?, label_source = ? "
         "WHERE clip_id = ? AND cls = 'animal' AND conf >= ? AND feature IS NOT NULL "
         "AND (label_source IS NULL OR label_source != 'correction')",
-        (label, _iso(datetime.now()), source, clip_id, DET_MIN),
+        (label, iso(datetime.now()), source, clip_id, DET_MIN),
     )
     conn.commit()
     return cur.rowcount
@@ -389,7 +389,7 @@ def clips_needing_recognition(
     where = _NEEDS_RECOGNITION + (" AND recognition_wanted = 1" if wanted_only else "")
     order = "begin_at DESC, id DESC" if newest_first else "begin_at, id"
     rows = conn.execute(f"SELECT * FROM clip WHERE {where} ORDER BY {order} LIMIT ?", (limit,))
-    return [_clip(r) for r in rows]
+    return [row_to_clip(r) for r in rows]
 
 
 def count_needing_recognition(conn: sqlite3.Connection) -> int:
@@ -442,7 +442,7 @@ def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
         "ORDER BY c.begin_at, c.id",
         (visit_id,),
     )
-    return [_clip(r) for r in rows]
+    return [row_to_clip(r) for r in rows]
 
 
 def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
@@ -475,7 +475,7 @@ _VISIT_SELECT = (
 
 def list_visits(
     conn: sqlite3.Connection,
-    limit: int,
+    limit: int | None,
     *,
     after: tuple[str, int] | None = None,
     category: str | None = None,
@@ -483,7 +483,7 @@ def list_visits(
     day: date | None = None,
     favourite: bool | None = None,
 ) -> list[sqlite3.Row]:
-    """Visits newest first (`favourite` keeps only starred or only unstarred ones).
+    """Visits newest first (`favourite` keeps only starred or only unstarred ones); `limit=None` means all of them.
 
     `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
     (stored as local-time ISO text, like clips)."""
@@ -504,7 +504,8 @@ def list_visits(
         where.append("v.is_favourite = ?")
         args.append(int(favourite))
     clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
-    return conn.execute(f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?", (*args, limit)).fetchall()
+    sql = f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?"
+    return conn.execute(sql, (*args, -1 if limit is None else limit)).fetchall()  # SQLite: LIMIT -1 is no limit
 
 
 def sorted_counts(conn: sqlite3.Connection) -> dict[str, int]:

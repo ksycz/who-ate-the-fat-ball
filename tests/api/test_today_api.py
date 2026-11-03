@@ -165,3 +165,16 @@ def test_retry_failed_clip_without_raw_is_409(local, conn, cam):
 def test_status_says_whether_the_request_is_from_the_mac(local, lan):
     assert local.get("/api/status").json()["local"] is True
     assert lan.get("/api/status").json()["local"] is False
+
+
+def test_status_and_today_report_server_now(settings, stored_passwords):
+    from datetime import timezone
+
+    from fatball.api.app import create_app
+
+    from .conftest import LOCAL, TestClient
+
+    fixed = datetime(2026, 11, 2, 10, 0, 0, tzinfo=timezone(timedelta(hours=1)))
+    c = TestClient(create_app(settings, now=lambda: fixed), client=LOCAL)
+    assert c.get("/api/status").json()["now"] == "2026-11-02T10:00:00+01:00"
+    assert c.get("/api/today").json()["now"] == "2026-11-02T10:00:00+01:00"

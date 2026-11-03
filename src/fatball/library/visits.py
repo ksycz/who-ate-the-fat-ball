@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from fatball.library.db import begin_immediate
-from fatball.library.repo import Clip, _iso
+from fatball.library.repo import Clip, iso
 from fatball.recognition.matcher import Verdict
 
 GAP = timedelta(seconds=60)  # a clip joins a visit when its gap to one of the visit's clips is under this
@@ -77,7 +77,7 @@ def note_first_seen(conn: sqlite3.Connection, scientific: str, when: datetime) -
         return None
     previous = row["first_seen_at"]
     if previous is None or when.astimezone() < datetime.fromisoformat(previous):
-        conn.execute("UPDATE species SET first_seen_at = ? WHERE scientific_name = ?", (_iso(when), scientific))
+        conn.execute("UPDATE species SET first_seen_at = ? WHERE scientific_name = ?", (iso(when), scientific))
     return previous
 
 
@@ -123,7 +123,7 @@ def _compatible_visits(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -
     """Visits this clip may join, earliest first."""
     candidates = conn.execute(
         "SELECT * FROM visit WHERE started_at <= ? AND ended_at >= ? ORDER BY started_at, id",
-        (_iso(clip.end_at + _MARGIN), _iso(clip.begin_at - _MARGIN)),
+        (iso(clip.end_at + _MARGIN), iso(clip.begin_at - _MARGIN)),
     ).fetchall()
     sure_id = _species_id(conn, verdict.species) if verdict.subject == "species" and verdict.species else None
     if verdict.subject == "species" and sure_id is None:

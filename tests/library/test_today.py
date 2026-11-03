@@ -209,3 +209,34 @@ def test_list_visits_filters_favourites(conn, cam):
     assert [r["id"] for r in repo.list_visits(conn, 10, favourite=True)] == [b]
     assert [r["id"] for r in repo.list_visits(conn, 10, favourite=False)] == [a]
     assert [r["id"] for r in repo.list_visits(conn, 10)] == [b, a]
+
+
+SQUIRREL = "Sciurus vulgaris"
+
+
+def test_new_species_ignores_first_seen_outside_any_visit(conn, cam):
+    visit_at(conn, cam, at(9), sure(GREAT))
+    visit_at(conn, cam, at(13), sure(GREAT))
+    conn.execute("UPDATE species SET first_seen_at = ? WHERE scientific_name = ?", (at(7).astimezone().isoformat(), GREAT))
+    conn.commit()
+    assert today.new_species(conn) is None
+
+
+def test_champion_photo_comes_from_most_confident_visit(conn, cam):
+    paths = {}
+    for hour, conf in ((9, 0.6), (11, 0.9), (13, 0.7)):
+        clip_id, _ = visit_at(conn, cam, at(hour), sure(GREAT, conf=conf))
+        paths[conf] = f"frames/{clip_id}.jpg"
+    assert today.champion(conn, DAY)["best_frame_path"] == paths[0.9]
+
+
+def test_species_overview_orders_mammals_after_birds_by_visits(conn, cam):
+    visit_at(conn, cam, at(8), sure(DOG, category="other"))
+    visit_at(conn, cam, at(10), sure(SQUIRREL, category="other_animals"))
+    visit_at(conn, cam, at(12), sure(SQUIRREL, category="other_animals"))
+    groups = [(r["scientific_name"], r["grp"], r["visits"]) for r in repo.species_overview(conn)]
+    mammals = [i for i, g in enumerate(groups) if g[1] != "bird"]
+    assert min(mammals) > max(i for i, g in enumerate(groups) if g[1] == "bird")
+    names = [g[0] for g in groups]
+    assert names.index(SQUIRREL) < names.index(DOG)
+    assert {g[0]: g[2] for g in groups}[SQUIRREL] == 2

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from fatball.library import visits
 from fatball.library.db import begin_immediate
-from fatball.library.repo import _iso, category_for
+from fatball.library.repo import category_for, iso
 from fatball.recognition.matcher import DET_MIN
 
 UNDO_TTL = timedelta(hours=24)
@@ -90,7 +90,7 @@ def apply(conn: sqlite3.Connection, visit_id: int, change: Change, now: datetime
             cur = conn.execute(
                 "INSERT INTO correction(visit_id, from_species_id, to_species_id, from_category, to_category, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (visit_id, visit["species_id"], species_id, visit["category"], category, _iso(now)),
+                (visit_id, visit["species_id"], species_id, visit["category"], category, iso(now)),
             )
             before["correction_id"] = cur.lastrowid
         if updates:
@@ -100,7 +100,7 @@ def apply(conn: sqlite3.Connection, visit_id: int, change: Change, now: datetime
         token = secrets.token_urlsafe(16)
         conn.execute(
             "INSERT INTO undo(token, visit_id, before_json, created_at) VALUES (?, ?, ?, ?)",
-            (token, visit_id, json.dumps(before), _iso(now)),
+            (token, visit_id, json.dumps(before), iso(now)),
         )
     return token
 
@@ -167,7 +167,7 @@ def _label(conn: sqlite3.Connection, visit_id: int, label: str, now: datetime) -
     ).fetchall()
     conn.executemany(
         "UPDATE detection SET label = ?, labelled_at = ?, label_source = 'correction' WHERE id = ?",
-        [(label, _iso(now), r["id"]) for r in rows],
+        [(label, iso(now), r["id"]) for r in rows],
     )
     return [dict(r) for r in rows]
 

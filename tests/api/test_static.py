@@ -99,3 +99,35 @@ def test_nul_in_path_is_404_not_500(settings, tmp_path):
     static.mkdir()
     (static / "index.html").write_text("<html>gallery</html>")
     assert _client(settings, static).get("/%00").status_code == 404
+
+
+def test_media_rejects_traversal(settings, tmp_path):
+    c = _client(settings, tmp_path / "static")  # creates the database next to media/
+    assert settings.db_path.parent == settings.media_dir.parent
+    # The client would flatten a literal /media/../ itself, so send it percent-encoded.
+    for path in (f"/media/%2e%2e/{settings.db_path.name}", f"/media/..%2f{settings.db_path.name}"):
+        r = c.get(path)
+        assert r.status_code == 404
+        assert not r.content.startswith(b"SQLite")
+
+
+def test_media_rejects_symlink_outside(settings, tmp_path):
+    (tmp_path / "secret.txt").write_text("secret")
+    (settings.media_dir / "link.txt").symlink_to(tmp_path / "secret.txt")
+    r = _client(settings, tmp_path / "static").get("/media/link.txt")
+    assert r.status_code == 404
+
+
+def test_unknown_post_is_json_404(settings, tmp_path):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html>gallery</html>")
+    c = _client(settings, static)
+    for path in ("/nowhere", "/api/nowhere"):
+        r = c.post(path)
+        assert r.status_code == 404
+        assert r.json() == {"detail": "Not Found"}
+
+
+def test_wrong_method_on_a_real_route_stays_405(settings, tmp_path):
+    assert _client(settings, tmp_path / "static").post("/api/status").status_code == 405
