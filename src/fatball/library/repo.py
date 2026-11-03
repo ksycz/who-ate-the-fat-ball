@@ -233,6 +233,26 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.commit()
 
 
+def unnotified_bird_visits(conn: sqlite3.Connection, settled_before: datetime) -> list[sqlite3.Row]:
+    """Bird visits not yet announced that ended at or before `settled_before`, oldest first, with the English
+    `species_name` (None for an Unknown bird) and `is_new_species` (the species' first sighting is this visit)."""
+    return conn.execute(
+        "SELECT v.id, v.started_at, v.ended_at, n.name AS species_name, "
+        "COALESCE(julianday(s.first_seen_at) BETWEEN julianday(v.started_at) AND julianday(v.ended_at), 0) "
+        "AS is_new_species "
+        "FROM visit v LEFT JOIN species s ON s.id = v.species_id "
+        "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
+        "WHERE v.category = 'birds' AND v.notified_at IS NULL AND julianday(v.ended_at) <= julianday(?) "
+        "ORDER BY v.started_at, v.id",
+        (iso(settled_before),),
+    ).fetchall()
+
+
+def mark_notified(conn: sqlite3.Connection, ids: Iterable[int], now: datetime) -> None:
+    conn.executemany("UPDATE visit SET notified_at = ? WHERE id = ?", [(iso(now), i) for i in ids])
+    conn.commit()
+
+
 def ensure_catalog(conn: sqlite3.Connection) -> None:
     """Make sure every catalog species has a row and an English name. Safe to call any number of times."""
     for english, scientific, group in CATALOG:

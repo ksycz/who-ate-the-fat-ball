@@ -135,6 +135,8 @@ Recognition waits while there are no examples at all. Clips still convert and pl
 
 Only new clips are recognised by default; `/api/status` shows `recognition.old_waiting` for the older ones. Recognise some now with `uv run fatball recognize-old --limit 20` (add `--newest-first` to start from the latest; Ctrl-C stops after the current clip), or let the app work through all of them slowly in the background with `uv run fatball recognize-old --background on` (`off` turns it back off). Retrying a clip always recognises it.
 
+A Mac banner announces new bird visits (and new species) while `fatball serve` runs; `uv run fatball notifications off` silences it (`on` turns it back on, no argument shows the state).
+
 ### Your library is backed up before an upgrade
 
 Before the app upgrades an existing library to a newer format, it saves a copy next to it, for example `library.sqlite.v1.bak` in `~/Library/Application Support/WhoAteTheFatBall/`. Upgrades can't be undone, so keep that file until you're happy with the new version. An existing backup is never overwritten.

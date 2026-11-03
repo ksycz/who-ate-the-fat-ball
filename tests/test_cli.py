@@ -507,3 +507,15 @@ def test_recognize_old_runs_when_the_heartbeat_is_stale(library, capsys):
     assert cli.run_recognize_old(settings, limit=1, detector_loader=_bird_loader(), features=_bird_features,
                                  now=lambda: now) == 0
     assert old[0] in _recognized_ids(conn)
+
+
+def test_cli_notifications_toggle(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FATBALL_DATA_DIR", str(tmp_path / "data"))
+    assert cli.main(["notifications"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are on."
+    assert cli.main(["notifications", "off"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are off."
+    assert cli.main(["notifications"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are off."
+    assert cli.main(["notifications", "on"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are on."
