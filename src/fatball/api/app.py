@@ -22,7 +22,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import cleanup, corrections, db, repo, today
+from fatball.library import cleanup, corrections, db, repo, stats, today
 
 STATIC_DIR = Path(__file__).parent / "static"
 NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
@@ -221,7 +221,12 @@ def create_app(
         }
 
     @app.get("/api/species")
-    def species_list(conn: Conn):
+    def species_list(conn: Conn, period: Literal["week", "month", "all"] | None = None):
+        if period is not None:
+            return [
+                {**{k: v for k, v in r.items() if k != "photo_path"}, "photo_url": _media_url(r["photo_path"])}
+                for r in stats.species_for_period(conn, now().astimezone().date(), period)
+            ]
         return [
             {
                 "scientific": r["scientific_name"], "name": r["name"], "group": r["grp"],
@@ -229,6 +234,31 @@ def create_app(
             }
             for r in repo.species_overview(conn)
         ]
+
+    @app.get("/api/stats")
+    def stats_page(conn: Conn, weeks: Annotated[int, Query(ge=1, le=52)] = 4):
+        return stats.summary(conn, now().astimezone().date(), weeks)
+
+    @app.get("/api/videos")
+    def videos_feed(
+        conn: Conn,
+        limit: Annotated[int, Query(ge=1, le=200)] = 24,
+        cursor: str | None = None,
+        species: str | None = None,
+    ):
+        """Bird visits with a playable video, newest first; `filters` are the busiest species lately."""
+        after = _decode_cursor(cursor) if cursor else None
+        rows = stats.videos(conn, limit + 1, after, species)
+        page = rows[:limit]
+        return {
+            "items": [
+                {**_visit_json(r), "video_url": _media_url(r["video_path"]), "video_clip_id": r["video_clip_id"]}
+                for r in page
+            ],
+            "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None,
+            "total": stats.videos_total(conn, species),
+            "filters": stats.top_species(conn, now().astimezone().date()),
+        }
 
     @app.get("/api/clips")
     def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
