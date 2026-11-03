@@ -161,7 +161,8 @@ def create_app(
 
     def now_json() -> str:
         """The server's time with its UTC offset, so the browser can tell how far its own clock is off."""
-        return now().astimezone().isoformat(timespec="seconds")
+        t = now()
+        return (t if t.tzinfo else t.astimezone()).isoformat(timespec="seconds")
 
     def can_retry(clip: repo.Clip) -> bool:
         """A ready clip can be recognised again; a failed one can be converted again while its raw file exists."""
