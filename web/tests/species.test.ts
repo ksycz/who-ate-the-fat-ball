@@ -5,7 +5,7 @@ import Species from "../src/pages/Species.svelte";
 import SpeciesCard from "../src/components/SpeciesCard.svelte";
 import VisitList from "../src/pages/VisitList.svelte";
 import { noteServerDay, period } from "../src/lib/session";
-import { clearLists } from "../src/lib/listCache";
+import { clearLists, rememberSpeciesName } from "../src/lib/listCache";
 import { route } from "../src/lib/router";
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -72,14 +72,45 @@ describe("By species", () => {
     expect(screen.getAllByRole("link")).toHaveLength(2);
   });
 
-  it("switches period, replacing nothing in history and asking again", async () => {
+  it("switches period and asks again, with the new period's subtitle", async () => {
     serve([row()]);
     render(Species);
     await screen.findByText("Great tit");
     await fireEvent.click(screen.getByRole("button", { name: "This month" }));
     await waitFor(() => expect(speciesUrls()).toContain("/api/species?period=month"));
     expect(get(period)).toBe("month");
-    expect(screen.getByText("1 species · this month")).toBeTruthy();
+    expect(await screen.findByText("1 species · this month")).toBeTruthy();
+  });
+
+  it("hides the subtitle and the old cards while the new period loads", async () => {
+    serve([row()]);
+    render(Species);
+    await screen.findByText("Great tit");
+    let release: (r: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => (release = r)));
+    await fireEvent.click(screen.getByRole("button", { name: "This month" }));
+    expect(screen.queryByText("Great tit")).toBeNull();
+    expect(screen.queryByText(/species ·/)).toBeNull();
+    release(new Response(JSON.stringify([row({ visits: 5 })]), { status: 200 }));
+    expect(await screen.findByText("1 species · this month")).toBeTruthy();
+  });
+
+  it("on a failure shows the message and Try again, with no old cards, and Try again reloads", async () => {
+    serve([row()]);
+    render(Species);
+    await screen.findByText("Great tit");
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "This month" }));
+    expect(await screen.findByText("Couldn't load the birds. Check the Wi-Fi and try again.")).toBeTruthy();
+    expect(screen.queryByText("Great tit")).toBeNull();
+    expect(screen.queryByText(/species ·/)).toBeNull();
+    const before = speciesUrls().length;
+    await fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Great tit")).toBeTruthy();
+    expect(speciesUrls().length).toBe(before + 1);
+    expect(screen.queryByText("Couldn't load the birds. Check the Wi-Fi and try again.")).toBeNull();
   });
 
   it("says so when there are no birds", async () => {
@@ -131,5 +162,17 @@ describe("one species' visits", () => {
     expect(q.get("species")).toBe("Parus major");
     expect(screen.queryByRole("group", { name: "View" })).toBeNull();
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+  });
+
+  it("titles itself with the remembered name at once, and never flashes the scientific name", async () => {
+    rememberSpeciesName("Parus major", "Great tit");
+    serve([]);
+    render(VisitList, { kind: "birds", species: "Parus major" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Great tit");
+    cleanup();
+    serve([]);
+    render(VisitList, { kind: "birds", species: "Erithacus rubecula" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("");
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Erithacus rubecula"));
   });
 });

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { rememberSpeciesName } from "../lib/listCache";
+  import { speciesLabel } from "../lib/format";
   import { getJSON, type SpeciesSummary } from "../lib/api";
   import { changes, noteServerDay, period, serverDay, type Period } from "../lib/session";
   import BirdsSwitch from "../components/BirdsSwitch.svelte";
@@ -19,10 +21,13 @@
   async function load() {
     const mine = ++generation;
     failed = false;
+    loaded = false;
+    rows = []; // the last period's cards don't stay under the new chip
     try {
       const got = await getJSON<SpeciesSummary[]>(`/api/species?period=${$period}`);
       if (mine !== generation) return;
       rows = got;
+      for (const r of got) rememberSpeciesName(r.scientific, speciesLabel(r));
       loaded = true;
     } catch {
       if (mine === generation) failed = true;
@@ -52,7 +57,7 @@
 <div class="page">
   <div class="head">
     <h1>Birds</h1>
-    <p class="sub">{rows.length} species · {SUBTITLE[$period]}</p>
+    {#if loaded}<p class="sub">{rows.length} species · {SUBTITLE[$period]}</p>{/if}
   </div>
   <BirdsSwitch view="species" />
   <FilterChips options={OPTIONS} value={LABELS[$period]} onchange={choose} />

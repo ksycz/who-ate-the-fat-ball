@@ -5,7 +5,7 @@
   import { deleteEmptyClips, moveVisits, selection } from "../lib/select";
   import { changes, noteServerDay, serverDay, showToast } from "../lib/session";
   import { askZip, type ZipPlan, type ZipRequest } from "../lib/zip";
-  import { loadList, loadOtherFilter, saveList, saveOtherFilter } from "../lib/listCache";
+  import { recallSpeciesName, loadList, loadOtherFilter, saveList, saveOtherFilter } from "../lib/listCache";
   import { arrival, back } from "../lib/router";
   import BirdsSwitch from "../components/BirdsSwitch.svelte";
   import DeleteConfirm from "../components/DeleteConfirm.svelte";
@@ -58,7 +58,14 @@
   // Remembered lists are kept per filter: "other:empty".
   const cacheKey = () =>
     species !== null ? `species:${species}` : kind === "other" && filter !== "all" ? `other:${filter}` : kind;
-  const title = $derived(species !== null ? (visits[0]?.species ? speciesLabel(visits[0].species) : species) : TITLES[kind]);
+  // A species page shows the name it was opened with; the raw scientific name only if nothing else is known.
+  const title = $derived(
+    species === null
+      ? TITLES[kind]
+      : visits[0]?.species
+        ? speciesLabel(visits[0].species)
+        : (recallSpeciesName(species) ?? (loaded ? species : "")),
+  );
 
   function chooseFilter(label: string) {
     const next = (Object.keys(FILTER_LABELS) as Filter[]).find((f) => FILTER_LABELS[f] === label);
