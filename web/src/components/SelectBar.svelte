@@ -28,6 +28,10 @@
   // A category list offers the other two; Favourites mixes them all, so it offers all three.
   const targets = $derived(ALL.filter((c) => kind === "favourites" || c !== kind));
   let moveOpen = $state(false);
+  $effect(() => {
+    void $wide;
+    moveOpen = false; // the reveal only exists on the phone layout
+  });
 </script>
 
 <div class="bar" role="region" aria-label="Selected visits">
