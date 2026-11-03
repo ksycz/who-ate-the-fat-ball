@@ -1,3 +1,4 @@
+import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import Videos from "../src/pages/Videos.svelte";
@@ -69,9 +70,10 @@ const feed = () => screen.getByRole("region", { name: "Videos feed" });
 const position = () => screen.getByText(/^\d+ of \d+$/).textContent;
 
 // jsdom has no PointerEvent: a MouseEvent with the pointer name carries the coordinates.
-function swipe(from: [number, number], to: [number, number], target: Element = feed()) {
+async function swipe(from: [number, number], to: [number, number], target: Element = feed()) {
   target.dispatchEvent(new MouseEvent("pointerdown", { clientX: from[0], clientY: from[1], bubbles: true }));
   target.dispatchEvent(new MouseEvent("pointerup", { clientX: to[0], clientY: to[1], bubbles: true }));
+  await tick();
 }
 
 beforeEach(() => {
@@ -148,15 +150,15 @@ describe("Videos", () => {
     serve(three());
     render(Videos);
     await screen.findByText("1 of 3");
-    swipe([200, 300], [170, 300]); // 30px left: nothing
+    await swipe([200, 300], [170, 300]); // 30px left: nothing
     expect(position()).toBe("1 of 3");
-    swipe([200, 300], [120, 300]); // left: next
+    await swipe([200, 300], [120, 300]); // left: next
     expect(position()).toBe("2 of 3");
-    swipe([200, 300], [200, 230]); // up: next
+    await swipe([200, 300], [200, 230]); // up: next
     expect(position()).toBe("3 of 3");
-    swipe([100, 300], [200, 310]); // right: previous
+    await swipe([100, 300], [200, 310]); // right: previous
     expect(position()).toBe("2 of 3");
-    swipe([200, 300], [205, 400]); // down: previous
+    await swipe([200, 300], [205, 400]); // down: previous
     expect(position()).toBe("1 of 3");
   });
 
@@ -164,12 +166,12 @@ describe("Videos", () => {
     serve(three());
     render(Videos);
     await screen.findByText("1 of 3");
-    swipe([200, 300], [140, 380]); // mostly down: previous, so nothing at the first item
+    await swipe([200, 300], [140, 380]); // mostly down: previous, so nothing at the first item
     expect(position()).toBe("1 of 3");
     vi.spyOn(video(), "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 400, left: 0, right: 300, width: 300, height: 400, x: 0, y: 0, toJSON() {} });
-    swipe([250, 380], [100, 380], video()); // started on the controls bar
+    await swipe([250, 380], [100, 380], video()); // started on the controls bar
     expect(position()).toBe("1 of 3");
-    swipe([250, 200], [100, 200], video()); // started on the picture
+    await swipe([250, 200], [100, 200], video()); // started on the picture
     expect(position()).toBe("2 of 3");
   });
 

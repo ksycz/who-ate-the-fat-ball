@@ -48,6 +48,9 @@
   <a class="item" href="/" use:link aria-current={name === "today" ? "page" : undefined} class:on={name === "today"}>
     <Icon name="Today" size={20} /><span class="label">Today</span>
   </a>
+  <a class="item" href="/videos" use:link aria-current={name === "videos" ? "page" : undefined} class:on={name === "videos"}>
+    <Icon name="Videos" size={20} /><span class="label">Videos</span>
+  </a>
   <a class="item" href="/favourites" use:link aria-current={name === "favourites" ? "page" : undefined} class:on={name === "favourites"}>
     <Icon name="Star" size={20} />
     <span class="label">Favourites</span>

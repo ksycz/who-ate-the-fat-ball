@@ -2,6 +2,7 @@ import { writable } from "svelte/store";
 
 export type RouteName =
   | "today"
+  | "videos"
   | "visit"
   | "birds"
   | "birds-species"
@@ -22,6 +23,7 @@ export interface Route {
 
 const FIXED: Record<string, RouteName> = {
   "/": "today",
+  "/videos": "videos",
   "/birds": "birds",
   "/birds/species": "birds-species",
   "/other-animals": "other-animals",
