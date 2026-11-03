@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import secrets as token_secrets
 import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
@@ -11,7 +12,7 @@ from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -22,7 +23,7 @@ from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import cleanup, corrections, db, repo, stats, today
+from fatball.library import cleanup, corrections, db, repo, stats, today, zips
 
 STATIC_DIR = Path(__file__).parent / "static"
 NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
@@ -66,6 +67,19 @@ class BulkPatch(BaseModel):
 
 class DeleteBody(BaseModel):
     visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
+
+
+class ZipBody(BaseModel):
+    """Either some visits, or a whole day (optionally one category and/or favourites only)."""
+
+    visit_ids: Annotated[list[int], Field(min_length=1)] | None = None
+    day: date | None = None
+    category: Literal["birds", "other_animals", "other"] | None = None
+    favourite: Literal[True] | None = None
+
+
+ZIP_TOKEN_TTL = timedelta(minutes=10)
+ZIP_TOKEN_MAX = 20
 
 
 def _local_now() -> datetime:
@@ -368,6 +382,45 @@ def create_app(
             repo.set_clip_status(conn, clip_id, "downloaded")
         else:
             repo.requeue_recognition(conn, clip_id)
+
+    zip_plans: dict[str, tuple[datetime, zips.ZipPlan]] = {}  # token -> (expires, plan); pruned on each POST
+
+    @app.post("/api/downloads/zip")
+    def make_zip(body: ZipBody, conn: Conn):
+        """Plan a .zip and say how big it is; the browser then fetches the token. Downloading is viewing: no PIN."""
+        if (body.visit_ids is None) == (body.day is None):
+            raise HTTPException(status_code=422, detail="give visit_ids or a day")
+        try:
+            plan = zips.plan_zip(
+                conn, settings.media_dir, visit_ids=body.visit_ids, day=body.day, category=body.category,
+                favourite=body.favourite,
+            )
+        except zips.TooMany as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+        except zips.NothingToDownload:
+            raise HTTPException(status_code=404, detail="Nothing to download") from None
+        t = now()
+        for k in [k for k, (expires, _) in zip_plans.items() if expires <= t]:
+            del zip_plans[k]
+        while len(zip_plans) >= ZIP_TOKEN_MAX:
+            del zip_plans[next(iter(zip_plans))]  # dicts keep insertion order: the oldest goes
+        token = token_secrets.token_urlsafe(16)
+        zip_plans[token] = (t + ZIP_TOKEN_TTL, plan)
+        return {
+            "token": token, "size_bytes": plan.size_bytes, "visits": plan.visits, "files": len(plan.entries),
+            "filename": plan.filename,
+        }
+
+    @app.get("/api/downloads/zip/{token}")
+    def download_zip(token: str):
+        entry = zip_plans.get(token)
+        if entry is None or entry[0] <= now():
+            raise HTTPException(status_code=404)
+        plan = entry[1]
+        return StreamingResponse(
+            zips.stream_zip(plan), media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{plan.filename}"'},
+        )
 
     @app.get("/media/{path:path}")
     def media(path: str):
