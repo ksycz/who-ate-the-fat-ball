@@ -138,7 +138,8 @@ def test_serve_fills_the_species_catalog_so_a_first_correction_works(tmp_path, m
 
     monkeypatch.setattr(uvicorn.Server, "run", stop_at_once)
     settings = Settings(data_dir=tmp_path / "data")  # a fresh install: nothing pre-fills the catalog
-    cli.serve(settings, host="127.0.0.1", port=_free_port(), detector_loader=lambda: None)
+    cli.serve(settings, host="127.0.0.1", port=_free_port(), detector_loader=lambda: None,
+              notifications=False)
     conn = connect(settings.db_path)
     try:
         cam = repo.upsert_camera(conn, "feeder", None, None)
@@ -507,3 +508,15 @@ def test_recognize_old_runs_when_the_heartbeat_is_stale(library, capsys):
     assert cli.run_recognize_old(settings, limit=1, detector_loader=_bird_loader(), features=_bird_features,
                                  now=lambda: now) == 0
     assert old[0] in _recognized_ids(conn)
+
+
+def test_cli_notifications_toggle(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FATBALL_DATA_DIR", str(tmp_path / "data"))
+    assert cli.main(["notifications"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are on."
+    assert cli.main(["notifications", "off"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are off."
+    assert cli.main(["notifications"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are off."
+    assert cli.main(["notifications", "on"]) == 0
+    assert capsys.readouterr().out.strip() == "Mac banners are on."

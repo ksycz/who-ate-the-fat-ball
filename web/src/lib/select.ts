@@ -1,0 +1,85 @@
+import { writable } from "svelte/store";
+import { ApiError, send, type Category } from "./api";
+import { CATEGORY_NAMES, plural } from "./format";
+import { route } from "./router";
+import { NETWORK_TEXT, noteChanged, showSaveFailure, showToast } from "./session";
+
+interface Selection {
+  on: boolean;
+  ids: Set<number>;
+}
+
+const store = writable<Selection>({ on: false, ids: new Set() });
+
+export const selection = {
+  subscribe: store.subscribe,
+  enter: () => store.update((s) => ({ ...s, on: true })),
+  toggle: (id: number) =>
+    store.update((s) => {
+      const ids = new Set(s.ids);
+      if (!ids.delete(id)) ids.add(id);
+      return { ...s, ids };
+    }),
+  selectAll: (ids: number[]) => store.update((s) => ({ ...s, ids: new Set(ids) })),
+  // Leaves select mode and forgets the picks.
+  clear: () => store.set({ on: false, ids: new Set() }),
+};
+
+// Picks never follow you to another page.
+route.subscribe(() => selection.clear());
+
+// The Mac takes at most this many visits in one move, delete or .zip.
+export const MAX_AT_ONCE = 500;
+
+// True (and a toast says why) when there are too many to send in one go; nothing is sent then.
+export function overLimit(count: number, verb: "move" | "delete" | "download"): boolean {
+  if (count <= MAX_AT_ONCE) return false;
+  showToast(`You can ${verb} up to ${MAX_AT_ONCE} visits at once`);
+  return true;
+}
+
+// "Great tit moved to Other" for one named visit, "3 visits moved to Other" otherwise.
+export function movedText(count: number, to: Category, name?: string): string {
+  const what = count === 1 && name ? name : plural(count, "visit");
+  return `${what} moved to ${CATEGORY_NAMES[to]}`;
+}
+
+// Move visits to a category in one go; the toast offers Undo. Used by the Select bar (and by drag, later).
+export async function moveVisits(ids: number[], category: Category, name?: string): Promise<void> {
+  if (overLimit(ids.length, "move")) return; // the picks stay
+  try {
+    const { undo_token, changed } = await send<{ undo_token: string | null; changed: number }>(
+      "POST",
+      "/api/visits/bulk",
+      { visit_ids: ids, category },
+    );
+    if (changed === 0 || !undo_token) {
+      showToast(`Already in ${CATEGORY_NAMES[category]}`);
+    } else {
+      showToast(movedText(changed, category, changed === ids.length ? name : undefined), undo_token);
+      noteChanged();
+    }
+    selection.clear();
+  } catch (e) {
+    showSaveFailure(e); // the picks stay, so the owner can try again
+  }
+}
+
+export const deletedText = (count: number) => `${plural(count, "empty clip")} deleted`;
+
+// Delete empty clips for good (the Mac refuses anything else). Returns true when they are gone.
+export async function deleteEmptyClips(ids: number[]): Promise<boolean> {
+  if (overLimit(ids.length, "delete")) return false; // the picks stay
+  try {
+    const { deleted } = await send<{ deleted: number }>("POST", "/api/visits/delete", { visit_ids: ids });
+    showToast(deletedText(deleted));
+    noteChanged();
+    selection.clear();
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) showSaveFailure(e);
+    else if (e instanceof ApiError) showToast(e.status === 409 ? "Only empty clips can be deleted" : "Couldn't delete that. Try again.");
+    else showToast(NETWORK_TEXT);
+    return false; // the picks stay
+  }
+}

@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from fatball import demo, secrets
+from fatball import demo, notify, secrets
 from fatball.api import auth as auth_mod
 from fatball.camera import discovery
 from fatball.camera.client import CameraError, CameraUnreachable, WrongPassword, XMClient
@@ -37,7 +37,7 @@ MIN_CAMERA_PASSWORD = 6
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fatball", description="Who Ate the Fat Ball? Bird-feeder camera app.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import,recognize-old}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import,recognize-old,notifications}")
     serve = sub.add_parser("serve", help="run the camera watcher, the converter and the web app")
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--background", choices=("on", "off"),
                       help="whether the app recognises older clips by itself (off: only new ones)")
     old.add_argument("--newest-first", action="store_true", help="with --limit: take the newest clips first")
+    note = sub.add_parser("notifications", help="switch Mac banners for new bird visits on or off "
+                                                "(no argument: show the current state)")
+    note.add_argument("state", nargs="?", choices=("on", "off"))
     return parser
 
 
@@ -76,6 +79,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "examples-import":
         settings = Settings.load()
         return run_examples_import(settings, args.csv, detector_loader=model_loader(settings))
+    if args.command == "notifications":
+        return run_notifications(Settings.load(), args.state)
     if args.command == "recognize-old":
         if args.limit is None and args.newest_first:
             build_parser().error("--newest-first only goes with --limit")
@@ -87,6 +92,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         serve(Settings.load(), host=args.host, port=args.port)
     else:
         run_demo(host=args.host, port=args.port)
+    return 0
+
+
+def run_notifications(settings: Settings, state: str | None) -> int:
+    conn = open_library(settings)
+    try:
+        if state is not None:
+            repo.set_setting(conn, notify.SETTING, state)
+        else:
+            state = repo.get_setting(conn, notify.SETTING) or "on"
+        print(f"Mac banners are {state}.")
+    finally:
+        conn.close()
     return 0
 
 
@@ -155,8 +173,8 @@ def model_loader(settings: Settings) -> Callable[[], object | None]:
 
 def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | None = None,
           banner: str = "", detector_loader: Callable[[], object | None] | None = None,
-          features: Callable | None = None) -> None:
-    """Run the watcher and the processor in background threads and the API in this one until Ctrl-C."""
+          features: Callable | None = None, notifications: bool = True) -> None:
+    """Run the watcher and the processor (and the Mac banners) in background threads and the API in this one until Ctrl-C."""
     import uvicorn
 
     from fatball.api.app import create_app
@@ -164,6 +182,7 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
     open_library(settings).close()  # once at startup, not per API request
     # One connection per thread: sqlite3 connections are not safe for concurrent use (the API opens its own).
     watcher_conn, processor_conn = (db.connect(settings.db_path) for _ in range(2))
+    notifier_conn = db.connect(settings.db_path) if notifications else None
     stop = threading.Event()
     watcher = Watcher(settings, watcher_conn, sleep=stop.wait, **(watcher_options or {}))
     extra = {} if features is None else {"features": features}
@@ -173,6 +192,9 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
         threading.Thread(target=watcher.run_forever, name="watcher", daemon=True),
         threading.Thread(target=processor_loop, args=(processor, stop), name="processor", daemon=True),
     ]
+    if notifier_conn is not None:
+        threads.append(threading.Thread(target=notify.notifier_loop, args=(notifier_conn, stop, datetime.now),
+                                        name="notifier", daemon=True))
     for t in threads:
         t.start()
 
@@ -198,8 +220,9 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
         stop.set()
         for t in threads:
             t.join(timeout=15)
-        for c in (watcher_conn, processor_conn):
-            c.close()
+        for c in (watcher_conn, processor_conn, notifier_conn):
+            if c is not None:
+                c.close()
         print("Stopped.")
 
 
@@ -223,7 +246,7 @@ def run_demo(*, host: str = "127.0.0.1", port: int, n_clips: int = 12, days: int
         conn.close()
         detector, features = demo.fake_recognition()
         serve(settings, host=host, port=port, watcher_options=demo.watcher_options(),
-              detector_loader=lambda: detector, features=features,
+              detector_loader=lambda: detector, features=features, notifications=False,
               banner=DEMO_BANNER.format(n=n_clips, days=days))
 
 

@@ -22,13 +22,6 @@ function wallMs(w: Wall): number {
   return Date.UTC(w.y, w.m - 1, w.d, w.hh, w.mm, w.ss);
 }
 
-function nowWall(now: Date): Wall {
-  return {
-    y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate(),
-    hh: now.getHours(), mm: now.getMinutes(), ss: now.getSeconds(),
-  };
-}
-
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (w: Wall) => `${pad(w.hh)}:${pad(w.mm)}`;
@@ -95,23 +88,42 @@ export function visitName(visit: Visit): string {
   if (visit.subject === "nothing") return "Empty clip";
   if (visit.category === "birds") return "Unknown bird";
   if (visit.category === "other_animals") return "Unknown animal";
+  if (visit.category === "other") return "Other"; // a plain move to Other: it could be anything, so not "Empty clip"
   return "Unknown";
+}
+
+// Whole minutes from `at` to now, by the server's clock: the time it gave us (`serverNow`, read at
+// `fetchedAt` by this device's clock) plus however long this device has waited since (`nowMs`).
+// Only differences between two readings of the same clock are used, so a wrong browser date changes nothing.
+export function minutesAgo(at: string, serverNow: string, fetchedAt: number, nowMs: number): number {
+  const sinceReply = Math.max(0, nowMs - fetchedAt);
+  const ms = wallMs(parseWall(serverNow)) + sinceReply - wallMs(parseWall(at));
+  return Math.max(0, Math.floor(ms / 60000));
+}
+
+export interface ServerClock {
+  serverNow: string;
+  fetchedAt: number;
+  nowMs: number;
 }
 
 export function cameraStatus(
   camera: Status["camera"],
-  now: Date,
   today: string,
+  clockNow: ServerClock,
 ): { dot: "ok" | "asleep" | "problem"; text: string } {
   const dot = camera.state;
   const seen = camera.last_seen_at ? parseWall(camera.last_seen_at) : null;
   if (dot === "ok") {
-    if (!seen) return { dot, text: "Camera seen just now" };
-    const minutes = Math.floor((wallMs(nowWall(now)) - wallMs(seen)) / 60000);
+    if (!camera.last_seen_at) return { dot, text: "Camera seen just now" };
+    const minutes = minutesAgo(camera.last_seen_at, clockNow.serverNow, clockNow.fetchedAt, clockNow.nowMs);
     return { dot, text: minutes < 1 ? "Camera seen just now" : `Camera seen ${minutes} min ago` };
   }
   if (dot === "asleep") {
-    return { dot, text: seen ? `Camera asleep · seen ${clock(seen)}` : "Camera asleep" };
+    if (!seen) return { dot, text: "Camera asleep" };
+    const when = dayLabel(seen, today);
+    if (when === "today") return { dot, text: `Camera asleep · seen ${clock(seen)}` };
+    return { dot, text: `Camera asleep · since ${when === "yesterday" ? `yesterday ${clock(seen)}` : `${seen.d} ${MONTHS[seen.m - 1]}`}` };
   }
   if (!seen) return { dot, text: "Camera not seen yet · Check App status" };
   const when = dayLabel(seen, today);
@@ -145,6 +157,13 @@ export function dayOf(at: string): string {
   return dayKey(parseWall(at));
 }
 
+// The colour dot beside each category (the same as in the side menu).
+export const CATEGORY_DOTS: Record<Category, string> = {
+  birds: "var(--robin)",
+  other_animals: "var(--dot-animals)",
+  other: "var(--dot-other)",
+};
+
 export const CATEGORY_NAMES: Record<Category, string> = {
   birds: "Birds",
   other_animals: "Other animals",
@@ -158,3 +177,22 @@ export function correctionText(from: Category, to: Category, label: string): str
 
 // "1 visit", "2 visits".
 export const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// "820 KB", "14.2 MB", "1.3 GB": a file size in words, decimal units like Finder (1 decimal from 1 MB).
+// The unit is picked after rounding, so 999,999 bytes is "1.0 MB", not "1000 KB".
+export function sizeText(bytes: number): string {
+  const kb = Math.ceil(bytes / 1e3);
+  if (kb < 1000) return `${Math.max(0, kb)} KB`;
+  const mb = (bytes / 1e6).toFixed(1);
+  if (Number(mb) < 1000) return `${mb} MB`;
+  return `${(bytes / 1e9).toFixed(1)} GB`;
+}
+
+// 0 for no visits, else 1-4 by share of the busiest cell.
+export function heatLevel(n: number, max: number): 0 | 1 | 2 | 3 | 4 {
+  if (n <= 0 || max <= 0) return 0;
+  return Math.min(4, Math.max(1, Math.ceil((4 * n) / max))) as 1 | 2 | 3 | 4;
+}
+
+// "Tue 8–10 am · 12 visits", from the server's day and slot labels.
+export const cellText = (day: string, slot: string, n: number): string => `${day} ${slot} · ${plural(n, "visit")}`;

@@ -19,6 +19,16 @@ export function loadList(kind: string): ListState | undefined {
   return lists.get(kind);
 }
 
+// The Other page's chosen filter, so Back from a visit lands on the same filter.
+let otherFilter = "all";
+export const saveOtherFilter = (f: string) => (otherFilter = f);
+export const loadOtherFilter = () => otherFilter;
+
+// Display names of species the owner has seen on By species, so a species page can title itself at once.
+const speciesNames = new Map<string, string>();
+export const rememberSpeciesName = (scientific: string, name: string) => speciesNames.set(scientific, name);
+export const recallSpeciesName = (scientific: string) => speciesNames.get(scientific);
+
 export function clearLists(): void {
   lists.clear();
 }

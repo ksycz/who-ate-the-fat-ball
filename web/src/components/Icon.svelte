@@ -6,6 +6,8 @@
     Birds: '<path d="M4 16c4 0 6-2.5 7-5.5C12.3 6.8 15.5 5 18.5 7L21 8l-2.5.8C18 15 13 19 7 18.5L4 20l1-3z"></path>',
     Stats: '<path d="M5 21v-8M12 21V8M19 21v-5"></path><circle cx="5" cy="10.5" r="2"></circle><circle cx="12" cy="5.5" r="2"></circle><circle cx="19" cy="13.5" r="2"></circle>',
     More: '<ellipse cx="6" cy="12" rx="1.7" ry="2.6" transform="rotate(-20 6 12)"></ellipse><ellipse cx="12" cy="12" rx="1.7" ry="2.6"></ellipse><ellipse cx="18" cy="12" rx="1.7" ry="2.6" transform="rotate(20 18 12)"></ellipse>',
+    Star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"></path>',
+    Camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle>',
   } as const;
 
   let { name, size = 22 }: { name: keyof typeof ICONS; size?: number } = $props();

@@ -3,7 +3,7 @@
   import { getJSON, send, type Category, type Species, type Visit } from "../lib/api";
   import { correctionText, speciesLabel } from "../lib/format";
   import { link } from "../lib/link";
-  import { noteChanged, saveFailure, showToast } from "../lib/session";
+  import { canEdit, noteChanged, saveFailure, showToast } from "../lib/session";
 
   let { visit, onclose, onchanged }: { visit: Visit; onclose: () => void; onchanged: (visit: Visit) => void } = $props();
 
@@ -55,6 +55,7 @@
       onclose();
     } catch (e) {
       error = saveFailure(e);
+      if (error.locked) canEdit.set(false); // the Mac says this device may not edit, so stop offering it
     } finally {
       busy = false;
     }

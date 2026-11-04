@@ -98,6 +98,7 @@ describe("listCache", () => {
 describe("Today", () => {
   const data = {
     day: "2026-11-03",
+    now: "2026-11-03T09:20:00+01:00",
     summary: { visits: 0, species: 0 },
     champion: null,
     new_species: null,

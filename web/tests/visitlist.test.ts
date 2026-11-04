@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import VisitList from "../src/pages/VisitList.svelte";
-import { noteServerDay, noteUndone } from "../src/lib/session";
+import { noteServerDay, noteUndone, serverDay } from "../src/lib/session";
 import type { Visit } from "../src/lib/api";
 
 function visit(id: number, startedAt: string, over: Partial<Visit> = {}): Visit {
@@ -33,8 +33,11 @@ const ALL: Visit[] = Array.from({ length: 300 }, (_, i) => {
 });
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let visitsDown = false;
+let statusDown = false;
 function serve(items: Visit[] = ALL, newSpecies: unknown = null) {
   fetchMock = vi.fn(async (url: string) => {
+    if ((url.startsWith("/api/visits") && visitsDown) || (url === "/api/status" && statusDown)) throw new TypeError("Failed to fetch");
     if (url === "/api/today") return new Response(JSON.stringify({ day: "2026-11-03", new_species: newSpecies }), { status: 200 });
     if (url.startsWith("/api/visits")) {
       const q = new URL(url, "http://x").searchParams;
@@ -52,6 +55,8 @@ const visitUrls = () => fetchMock.mock.calls.map((c) => c[0] as string).filter((
 
 let observerCallback: (() => void) | null = null;
 beforeEach(() => {
+  visitsDown = false;
+  statusDown = false;
   noteServerDay("2026-11-03");
   observerCallback = null;
   vi.stubGlobal(
@@ -175,6 +180,28 @@ describe("VisitList", () => {
     await screen.findAllByRole("link", { name: /Great tit/ });
     expect(screen.queryByText("New species")).toBeNull();
     expect(other.container.querySelector('[data-placement]')).toBeNull();
+  });
+
+  it("first_page_failure_offers_try_again", async () => {
+    visitsDown = true;
+    serve();
+    render(VisitList, { kind: "birds" });
+    expect(await screen.findByText("Couldn't load visits. Check the Wi-Fi and try again.")).toBeTruthy();
+    visitsDown = false;
+    await fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findAllByRole("link", { name: /Great tit/ });
+    expect(screen.queryByText(/Couldn't load visits/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("renders_with_day_headings_from_the_dates_when_status_fails", async () => {
+    serverDay.set(null);
+    statusDown = true;
+    serve();
+    render(VisitList, { kind: "other" });
+    await screen.findAllByRole("link", { name: /Great tit/ });
+    const names = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(names).toEqual(["Tuesday 3 November"]);
   });
 
   it("reloads_from_the_first_page_after_an_undo", async () => {

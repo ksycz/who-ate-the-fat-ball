@@ -4,16 +4,17 @@
   import { cameraStatus, plural, whenText } from "../lib/format";
   import { noteServerDay, serverDay } from "../lib/session";
   import { link } from "../lib/link";
+  import { tick } from "../lib/clock";
 
   let status = $state<Status | null>(null);
   let failed = $state(false);
-  let now = $state(new Date());
+  let fetchedAt = $state(0);
 
   onMount(() => {
     getJSON<Status>("/api/status").then(
       (s) => {
         status = s;
-        now = new Date();
+        fetchedAt = Date.now();
         noteServerDay(s.day);
       },
       () => (failed = true),
@@ -28,7 +29,9 @@
   };
   const errorText = (code: string) => ERRORS[code] ?? `Something went wrong (${code}). The app keeps trying.`;
 
-  const cam = $derived(status ? cameraStatus(status.camera, now, $serverDay ?? status.day) : null);
+  const cam = $derived(
+    status ? cameraStatus(status.camera, $serverDay ?? status.day, { serverNow: status.now, fetchedAt, nowMs: $tick }) : null,
+  );
   const lastSeen = $derived(
     status?.camera.last_seen_at ? whenText(status.camera.last_seen_at, $serverDay ?? status.day) : "not yet",
   );
@@ -48,7 +51,6 @@
   <section>
     <h2>Processing</h2>
     <p class="line">{plural(waiting, "clip")} waiting</p>
-    <p class="line">{status.recognition.pending} waiting to be recognised</p>
     {#if status.queue.failed > 0}<p class="line">{status.queue.failed} failed</p>{/if}
   </section>
   <section>

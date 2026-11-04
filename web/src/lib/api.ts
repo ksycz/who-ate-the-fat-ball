@@ -46,6 +46,17 @@ export interface SpeciesRef {
   name: string | null;
 }
 
+// One row of GET /api/species?period=: the counts are for the period, the dates are all-time.
+export interface SpeciesSummary {
+  scientific: string;
+  name: string | null;
+  visits: number;
+  last_seen_at: string;
+  first_seen_at: string | null;
+  is_new: boolean;
+  photo_url: string | null;
+}
+
 export interface Visit {
   id: number;
   started_at: string;
@@ -76,6 +87,14 @@ export interface Clip {
   preview_url: string | null;
 }
 
+export interface Guess {
+  scientific: string;
+  name: string | null;
+  confidence: number;
+}
+
+export type VisitDetail = Visit & { clips: Clip[]; guesses: Guess[] };
+
 export interface Camera {
   state: CameraState;
   last_seen_at: string | null;
@@ -84,6 +103,7 @@ export interface Camera {
 
 export interface Today {
   day: string;
+  now: string; // the Mac's clock when it answered, ISO with its UTC offset
   summary: { visits: number; species: number };
   champion: {
     scientific: string;
@@ -110,10 +130,22 @@ export interface Species {
 
 export interface Status {
   day: string;
+  now: string; // the Mac's clock when it answered, ISO with its UTC offset
   local: boolean; // the request comes from the Mac itself
   camera: Camera;
   sorted: { birds: number; other_animals: number; other: number; favourites: number };
   queue: { downloaded: number; processing: number; failed: number };
   recognition: { pending: number; old_waiting: number; errors: number; model: boolean; examples: number };
   disk: { free_bytes: number; low: boolean };
+}
+
+export interface StatsSummary {
+  weeks: number;
+  visits: number;
+  species: number;
+  busiest: string | null;
+  slots: string[];
+  heatmap: { day: string; cells: number[] }[];
+  per_species: { scientific: string; name: string | null; visits: number }[];
+  unknown_visits: number; // Unknown birds: in `visits`, not in any species bar
 }

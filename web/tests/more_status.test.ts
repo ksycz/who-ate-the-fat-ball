@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { get } from "svelte/store";
 import More from "../src/pages/More.svelte";
 import AppStatus from "../src/pages/AppStatus.svelte";
@@ -12,6 +12,7 @@ import type { Status } from "../src/lib/api";
 function status(over: Partial<Status> = {}): Status {
   return {
     day: "2026-11-02",
+    now: "2026-11-02T10:02:00+00:00",
     local: true,
     camera: { state: "ok", last_seen_at: "2026-11-02T10:00:00+00:00", last_error: null },
     sorted: { birds: 41, other_animals: 3, other: 7, favourites: 12 },
@@ -69,6 +70,28 @@ describe("More", () => {
     expect(screen.queryByRole("link", { name: "Unlock editing" })).toBeNull();
   });
 
+  it("camera_text_updates_every_30_seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 10, 2, 0));
+    serve(status({ camera: { state: "ok", last_seen_at: "2026-11-02T10:00:00+00:00", last_error: null } }));
+    render(More);
+    await screen.findByText(/Camera seen 2 min ago/);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(screen.getByText(/Camera seen 2 min ago/)).toBeTruthy();
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(screen.getByText(/Camera seen 3 min ago/)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("wide_layout_never_renders_the_heading", async () => {
+    narrow(true);
+    serve(status());
+    render(More);
+    expect(screen.queryByRole("heading", { name: "More" })).toBeNull();
+    await waitFor(() => expect(get(route).name).toBe("today"));
+    expect(screen.queryByRole("heading", { name: "More" })).toBeNull();
+  });
+
   it("wide_layout_redirects_to_today_without_a_history_entry", async () => {
     narrow(true);
     serve(status());
@@ -105,8 +128,14 @@ describe("AppStatus", () => {
     render(AppStatus);
     expect(await screen.findByText("12.4 GB free")).toBeTruthy();
     expect(screen.queryByText("Disk nearly full")).toBeNull();
-    expect(screen.getByText(/4 waiting to be recognised/)).toBeTruthy();
     expect(screen.getByText("7 clips waiting")).toBeTruthy();
+  });
+
+  it("shows_the_waiting_count_once", async () => {
+    serve(status());
+    render(AppStatus);
+    await screen.findByText("7 clips waiting");
+    expect(screen.getAllByText(/waiting/)).toHaveLength(1);
   });
 
   it("setup_link_only_when_the_server_says_local", async () => {
@@ -152,7 +181,8 @@ describe("Unlock", () => {
     render(Unlock);
     await typePin("1234");
     await waitFor(() => expect(get(canEdit)).toBe(true));
-    await waitFor(() => expect(get(route).name).not.toBe("unlock"));
+    await waitFor(() => expect(get(route).name).toBe("more"));
+    expect(window.location.pathname).toBe("/more");
     expect(JSON.parse(fetchMock.mock.calls.find((c) => c[0] === "/api/unlock")![1].body)).toEqual({ pin: "1234" });
   });
 });

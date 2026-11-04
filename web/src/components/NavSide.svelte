@@ -10,13 +10,13 @@
   import SortedInto from "./SortedInto.svelte";
 
   let status = $state<Status | null>(null);
-  let now = $state(new Date());
+  let fetchedAt = $state(0);
 
   async function load() {
     try {
       status = await getJSON<Status>("/api/status");
       noteServerDay(status.day);
-      now = new Date();
+      fetchedAt = Date.now();
     } catch {
       // the menu still works without counts
     }
@@ -38,7 +38,8 @@
     };
   });
 
-  const name = $derived($route.name);
+  // The By species pages belong to Birds.
+  const name = $derived($route.name === "birds-species" || $route.name === "species" ? "birds" : $route.name);
 </script>
 
 <nav aria-label="Main">
@@ -47,16 +48,22 @@
   <a class="item" href="/" use:link aria-current={name === "today" ? "page" : undefined} class:on={name === "today"}>
     <Icon name="Today" size={20} /><span class="label">Today</span>
   </a>
+  <a class="item" href="/videos" use:link aria-current={name === "videos" ? "page" : undefined} class:on={name === "videos"}>
+    <Icon name="Videos" size={20} /><span class="label">Videos</span>
+  </a>
   <a class="item" href="/favourites" use:link aria-current={name === "favourites" ? "page" : undefined} class:on={name === "favourites"}>
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"></path></svg>
+    <Icon name="Star" size={20} />
     <span class="label">Favourites</span>
     {#if status}<span class="count">{status.sorted.favourites}</span>{/if}
   </a>
 
   <SortedInto sorted={status?.sorted} current={name} />
 
+  <a class="item" href="/stats" use:link aria-current={name === "stats" ? "page" : undefined} class:on={name === "stats"}>
+    <Icon name="Stats" size={20} /><span class="label">Stats</span>
+  </a>
   <a class="item" href="/status" use:link aria-current={name === "status" ? "page" : undefined} class:on={name === "status"}>
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+    <Icon name="Camera" size={20} />
     <span class="label">App status</span>
   </a>
   {#if !$canEdit}
@@ -66,7 +73,7 @@
   {/if}
 
   <div class="camera">
-    {#if status}<CameraStatus camera={status.camera} {now} today={status.day} />{/if}
+    {#if status}<CameraStatus camera={status.camera} today={status.day} serverNow={status.now} {fetchedAt} />{/if}
   </div>
 </nav>
 

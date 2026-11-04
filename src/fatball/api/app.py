@@ -2,24 +2,29 @@
 
 import base64
 import binascii
+import secrets as token_secrets
 import shutil
 import sqlite3
+import threading
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Match
 
 from fatball import secrets as camera_secrets
 from fatball.api import auth as auth_mod
 from fatball.api.auth import Auth
 from fatball.config import Settings
 from fatball.ingest.watcher import CAMERA_NAME
-from fatball.library import corrections, db, repo, today
+from fatball.library import cleanup, corrections, db, repo, stats, today, zips
 
 STATIC_DIR = Path(__file__).parent / "static"
 NOT_BUILT = "The gallery isn't built yet. Run: npm --prefix web ci && npm --prefix web run build"
@@ -53,6 +58,29 @@ class VisitPatch(BaseModel):
     species: str | None = None
     category: Literal["birds", "other_animals", "other"] | None = None
     is_favourite: bool | None = None
+
+
+class BulkPatch(BaseModel):
+    visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
+    category: Literal["birds", "other_animals", "other"] | None = None
+    is_favourite: bool | None = None
+
+
+class DeleteBody(BaseModel):
+    visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
+
+
+class ZipBody(BaseModel):
+    """Either some visits, or a whole day (optionally one category and/or favourites only)."""
+
+    visit_ids: Annotated[list[int], Field(min_length=1)] | None = None
+    day: date | None = None
+    category: Literal["birds", "other_animals", "other"] | None = None
+    favourite: Literal[True] | None = None
+
+
+ZIP_TOKEN_TTL = timedelta(minutes=10)
+ZIP_TOKEN_MAX = 20
 
 
 def _local_now() -> datetime:
@@ -156,6 +184,11 @@ def create_app(
             "last_error": cam.last_error if cam else None,
         }
 
+    def now_json() -> str:
+        """The server's time with its UTC offset, so the browser can tell how far its own clock is off."""
+        t = now()
+        return (t if t.tzinfo else t.astimezone()).isoformat(timespec="seconds")
+
     def can_retry(clip: repo.Clip) -> bool:
         """A ready clip can be recognised again; a failed one can be converted again while its raw file exists."""
         if clip.status == "ready":
@@ -167,6 +200,7 @@ def create_app(
         free = shutil.disk_usage(settings.data_dir).free
         return {
             "day": now().astimezone().date().isoformat(),
+            "now": now_json(),
             "local": auth_mod.is_local(request),
             "camera": camera_json(conn),
             "sorted": repo.sorted_counts(conn),
@@ -183,6 +217,7 @@ def create_app(
         champ = today.champion(conn, day)
         return {
             "day": day.isoformat(),
+            "now": now_json(),
             "summary": today.summary(conn, day),
             "champion": (
                 {**{k: v for k, v in champ.items() if k != "best_frame_path"},
@@ -190,7 +225,7 @@ def create_app(
                 if champ else None
             ),
             "new_species": today.new_species(conn),
-            "visits": [_visit_json(r) for r in repo.list_visits(conn, 100_000, day=day)],
+            "visits": [_visit_json(r) for r in repo.list_visits(conn, None, day=day)],
             "checking": [_clip_json(c) for c in today.checking(conn, day)],
             "failed": [
                 {"clip_id": c.id, "begin_at": c.begin_at.isoformat(), "can_retry": can_retry(c)}
@@ -201,7 +236,12 @@ def create_app(
         }
 
     @app.get("/api/species")
-    def species_list(conn: Conn):
+    def species_list(conn: Conn, period: Literal["week", "month", "all"] | None = None):
+        if period is not None:
+            return [
+                {**{k: v for k, v in r.items() if k != "photo_path"}, "photo_url": _media_url(r["photo_path"])}
+                for r in stats.species_for_period(conn, now().astimezone().date(), period)
+            ]
         return [
             {
                 "scientific": r["scientific_name"], "name": r["name"], "group": r["grp"],
@@ -209,6 +249,31 @@ def create_app(
             }
             for r in repo.species_overview(conn)
         ]
+
+    @app.get("/api/stats")
+    def stats_page(conn: Conn, weeks: Annotated[int, Query(ge=1, le=52)] = 4):
+        return stats.summary(conn, now().astimezone().date(), weeks)
+
+    @app.get("/api/videos")
+    def videos_feed(
+        conn: Conn,
+        limit: Annotated[int, Query(ge=1, le=200)] = 24,
+        cursor: str | None = None,
+        species: str | None = None,
+    ):
+        """Bird visits with a playable video, newest first; `filters` are the busiest species lately."""
+        after = _decode_cursor(cursor) if cursor else None
+        rows = stats.videos(conn, limit + 1, after, species)
+        page = rows[:limit]
+        return {
+            "items": [
+                {**_visit_json(r), "video_url": _media_url(r["video_path"]), "video_clip_id": r["video_clip_id"]}
+                for r in page
+            ],
+            "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None,
+            "total": stats.videos_total(conn, species),
+            "filters": stats.top_species(conn, now().astimezone().date()),
+        }
 
     @app.get("/api/clips")
     def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
@@ -224,11 +289,15 @@ def create_app(
         species: str | None = None,
         day: date | None = None,
         favourite: bool | None = None,
+        only: Literal["dogs", "empty"] | None = None,
     ):
-        """Newest first. `day` is the local date of the visit's start (as stored)."""
+        """Newest first. `day` is the local date of the visit's start (as stored). `only` narrows Other."""
+        if only is not None and category != "other":
+            raise HTTPException(status_code=422, detail="only goes with category=other")
         after = _decode_cursor(cursor) if cursor else None
         rows = repo.list_visits(
             conn, limit + 1, after=after, category=category, species=species, day=day, favourite=favourite,
+            only=only,
         )
         page = rows[:limit]
         return {
@@ -255,6 +324,31 @@ def create_app(
         """Watching is viewing, so no PIN: it only clears the new-species banner."""
         if not today.mark_watched(conn, visit_id, now().astimezone()):
             raise HTTPException(status_code=404)
+
+    @app.post("/api/visits/bulk", dependencies=[Depends(auth_mod.require_editor)])
+    def bulk_visits(body: BulkPatch, conn: Conn):
+        """Move and/or favourite several visits; one undo token covers them all. A plain move teaches nothing."""
+        if body.category is None and body.is_favourite is None:
+            raise HTTPException(status_code=422, detail="give a category or is_favourite")
+        change = corrections.Change(category=body.category, is_favourite=body.is_favourite, teach=False)
+        try:
+            token, changed = corrections.apply_many(conn, body.visit_ids, change, now().astimezone())
+        except corrections.VisitNotFound:
+            raise HTTPException(status_code=404) from None
+        except corrections.InvalidChange as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+        return {"undo_token": token, "changed": changed}
+
+    @app.post("/api/visits/delete", dependencies=[Depends(auth_mod.require_editor)])
+    def delete_visits(body: DeleteBody, conn: Conn):
+        """Delete empty clips for good (their files too; the camera's copy is not fetched again)."""
+        try:
+            n = cleanup.delete_empty_visits(conn, settings.media_dir, body.visit_ids, now().astimezone())
+        except cleanup.VisitNotFound:
+            raise HTTPException(status_code=404) from None
+        except cleanup.NotEmpty:
+            raise HTTPException(status_code=409, detail="Only empty clips can be deleted") from None
+        return {"deleted": n}
 
     @app.patch("/api/visits/{visit_id}", dependencies=[Depends(auth_mod.require_editor)])
     def patch_visit(visit_id: int, body: VisitPatch, conn: Conn):
@@ -289,6 +383,48 @@ def create_app(
             repo.set_clip_status(conn, clip_id, "downloaded")
         else:
             repo.requeue_recognition(conn, clip_id)
+
+    zip_lock = threading.Lock()  # sync endpoints run in a thread pool
+    zip_plans: dict[str, tuple[datetime, zips.ZipPlan]] = {}  # token -> (expires, plan); pruned on each POST
+
+    @app.post("/api/downloads/zip")
+    def make_zip(body: ZipBody, conn: Conn):
+        """Plan a .zip and say how big it is; the browser then fetches the token. Downloading is viewing: no PIN."""
+        if (body.visit_ids is None) == (body.day is None):
+            raise HTTPException(status_code=422, detail="give visit_ids or a day")
+        try:
+            plan = zips.plan_zip(
+                conn, settings.media_dir, visit_ids=body.visit_ids, day=body.day, category=body.category,
+                favourite=body.favourite,
+            )
+        except zips.TooMany as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+        except zips.NothingToDownload:
+            raise HTTPException(status_code=404, detail="Nothing to download") from None
+        t = now()
+        token = token_secrets.token_urlsafe(16)
+        with zip_lock:
+            for k in [k for k, (expires, _) in zip_plans.items() if expires <= t]:
+                del zip_plans[k]
+            while len(zip_plans) >= ZIP_TOKEN_MAX:
+                del zip_plans[next(iter(zip_plans))]  # dicts keep insertion order: the oldest goes
+            zip_plans[token] = (t + ZIP_TOKEN_TTL, plan)
+        return {
+            "token": token, "size_bytes": plan.size_bytes, "visits": plan.visits, "files": len(plan.entries),
+            "filename": plan.filename,
+        }
+
+    @app.get("/api/downloads/zip/{token}")
+    def download_zip(token: str):
+        with zip_lock:
+            entry = zip_plans.get(token)
+        if entry is None or entry[0] <= now():
+            raise HTTPException(status_code=404)
+        plan = entry[1]
+        return StreamingResponse(
+            zips.stream_zip(plan), media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{plan.filename}"'},
+        )
 
     @app.get("/media/{path:path}")
     def media(path: str):
@@ -337,6 +473,15 @@ def create_app(
     # The gallery: registered after every API route so /api/* and /media/* 404s stay JSON.
     static_root = (static_dir or STATIC_DIR).resolve()
     app.mount("/assets", StaticFiles(directory=static_root / "assets", check_dir=False), name="assets")
+
+    @app.exception_handler(405)
+    async def method_not_allowed(request: Request, exc: StarletteHTTPException):
+        """Only the GET-only gallery fallback matched this path: the URL is unknown, so a JSON 404.
+        A wrong method on a real route stays a 405."""
+        for route in app.routes:
+            if getattr(route, "path", None) != "/{path:path}" and route.matches(request.scope)[0] != Match.NONE:
+                return await http_exception_handler(request, exc)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
 
     @app.get("/{path:path}", include_in_schema=False)
     def gallery(path: str):

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { send } from "../lib/api";
+  import { ApiError, send } from "../lib/api";
   import { link } from "../lib/link";
   import { noteUndone, showToast, toast, type Toast } from "../lib/session";
 
@@ -23,8 +23,9 @@
       await send("POST", `/api/undo/${t.undoToken}`);
       toast.set(null);
       noteUndone();
-    } catch {
-      showToast("Couldn't undo that"); // unknown or expired token, or the Wi-Fi dropped
+    } catch (e) {
+      if (e instanceof ApiError) showToast("Couldn't undo that"); // unknown or expired token: nothing left to try
+      else toast.set({ text: "Couldn't undo. Check the Wi-Fi and try again.", undoToken: t.undoToken }); // keep Undo for a retry
     } finally {
       busy = false;
     }
@@ -45,7 +46,7 @@
 
 <style>
   .toast {
-    position: fixed; z-index: 20; left: 16px; right: 16px; bottom: 100px; box-sizing: border-box;
+    position: fixed; z-index: 20; left: 16px; right: 16px; bottom: calc(var(--nav-phone-h) + 20px + var(--select-bar-h, 0px)); box-sizing: border-box;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     border-radius: 14px; padding: 6px 6px 6px 16px; background: var(--ink); color: #fff;
     font-size: 14px; box-shadow: 0 6px 18px rgba(40, 30, 20, 0.25);

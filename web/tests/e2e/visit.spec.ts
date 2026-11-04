@@ -1,5 +1,10 @@
 import { expect, isPhone, reseed, test } from "./helpers";
 
+// These specs change data: start each one from the seeded day, and leave it that way for the next file.
+test.beforeEach(async ({ request }) => {
+  await reseed(request);
+});
+
 test.afterAll(async ({ request }) => {
   await reseed(request);
 });

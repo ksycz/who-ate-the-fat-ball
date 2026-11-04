@@ -172,6 +172,21 @@ describe("Picker", () => {
     expect(get(toast)).toBeNull();
   });
 
+  it("undo_network_failure_keeps_the_undo_button", async () => {
+    serve(detail());
+    undoResult = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    render(Toast);
+    toast.set({ text: "Changed to Blue tit", undoToken: "tok9" });
+    await fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Check the Wi-Fi"));
+    // The Undo is still there to try again.
+    undoResult = () => new Response(null, { status: 204 });
+    await fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(get(toast)).toBeNull());
+  });
+
   it("undo_404_shows_couldnt_undo", async () => {
     serve(detail());
     undoResult = () => new Response(JSON.stringify({ detail: "gone" }), { status: 404 });
@@ -192,6 +207,16 @@ describe("Picker", () => {
     expect(within(alert).getByRole("link", { name: "Unlock" }).getAttribute("href")).toBe("/unlock");
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(get(toast)).toBeNull();
+  });
+
+  it("patch_403_turns_editing_off_but_leaves_the_dialog_and_its_message", async () => {
+    serve(detail());
+    patchResult = () => new Response(JSON.stringify({ detail: "locked" }), { status: 403 });
+    const { dialog } = await openPicker();
+    await fireEvent.click(within(dialog).getByRole("button", { name: /Blue tit/ }));
+    await within(dialog).findByRole("alert");
+    expect(get(canEdit)).toBe(false);
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
   it("network_error_keeps_picker_open_with_wifi_text", async () => {

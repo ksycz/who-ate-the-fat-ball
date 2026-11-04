@@ -69,10 +69,12 @@ class Recognizer:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(frames[verdict.best.frame_index], dest)
                 best_rel = dest.relative_to(media).as_posix()
-        repo.set_recognition(
+        stored = repo.set_recognition(
             self.conn, clip.id,
             best_frame_path=best_rel, verdict_json=verdict_to_json(verdict), recognized_at=datetime.now(),
         )
+        if not stored and best_rel is not None:  # deleted while it ran: its media must not come back
+            (media / best_rel).unlink(missing_ok=True)
         return verdict
 
     def _detect(self, frames: list[Path]) -> tuple[list[Crop], list[NewDetection]]:

@@ -17,6 +17,12 @@ describe("matchRoute", () => {
     expect(matchRoute("/unlock").name).toBe("unlock");
     expect(matchRoute("/setup").name).toBe("setup");
   });
+  it("parses the By species page and one species, decoding its name", () => {
+    expect(matchRoute("/birds/species")).toEqual({ name: "birds-species", params: {} });
+    expect(matchRoute("/birds/species/Parus%20major")).toEqual({ name: "species", params: { scientific: "Parus major" } });
+    expect(matchRoute("/birds/species/Parus%20major/")).toEqual({ name: "species", params: { scientific: "Parus major" } });
+    expect(matchRoute("/birds/species/%E0%A4%A").name).toBe("notfound");
+  });
   it("sends unknown paths to notfound", () => {
     expect(matchRoute("/nope").name).toBe("notfound");
     expect(matchRoute("/visit/abc").name).toBe("notfound");

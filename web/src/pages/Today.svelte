@@ -1,21 +1,20 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { getJSON, send, type Today } from "../lib/api";
+  import { getJSON, send, type Clip, type Today, type Visit } from "../lib/api";
   import { canEdit, changes, noteServerDay, showSaveFailure } from "../lib/session";
   import { loadTodayScroll, saveTodayScroll } from "../lib/listCache";
   import { arrival } from "../lib/router";
-  import { clipBadge, plural, speciesLabel, timeOfDay, visitTime, whenText } from "../lib/format";
+  import { plural, speciesLabel, timeOfDay, whenText } from "../lib/format";
   import { link } from "../lib/link";
   import Logo from "../components/Logo.svelte";
   import CameraStatus from "../components/CameraStatus.svelte";
   import NewSpeciesBanner from "../components/NewSpeciesBanner.svelte";
   import VisitCard from "../components/VisitCard.svelte";
-  import Chip from "../components/Chip.svelte";
 
   const REFRESH_MS = 30_000;
 
   let data = $state<Today | null>(null);
-  let now = $state(new Date());
+  let fetchedAt = $state(0);
   let retrying = $state(false);
   let unreachable = $state(false);
   let restoreY: number | null = null; // where Back left us; applied once, after the first render
@@ -26,7 +25,7 @@
     try {
       data = await getJSON<Today>("/api/today");
       unreachable = false;
-      now = new Date();
+      fetchedAt = Date.now();
       noteServerDay(data.day);
       if (restoreY !== null) {
         const y = restoreY;
@@ -77,6 +76,15 @@
       : "",
   );
 
+  // A clip still being recognised, shaped like a visit so the same card can show it.
+  function pendingVisit(clip: Clip): Visit {
+    return {
+      id: clip.id, started_at: clip.begin_at, ended_at: clip.end_at, category: "birds", species: null, subject: "",
+      confidence: null, is_favourite: false, best_frame_url: null, clip_count: 1, duration_s: clip.duration_s,
+      poster_url: clip.poster_url, preview_url: clip.preview_url, corrected: false, watched: false,
+    };
+  }
+
   function emptyText(d: Today): string {
     let text = "No visitors yet today.";
     if (d.last_visitor) {
@@ -110,7 +118,7 @@
 <div class="today">
   <header>
     <div class="brand"><Logo size={30} />Who Ate the Fat Ball?</div>
-    {#if data}<span class="pill"><CameraStatus camera={data.camera} {now} today={data.day} short /></span>{/if}
+    {#if data}<span class="pill"><CameraStatus camera={data.camera} today={data.day} serverNow={data.now} {fetchedAt} short /></span>{/if}
   </header>
 
   {#if unreachable}
@@ -173,23 +181,7 @@
     {#if data.checking.length > 0 || data.visits.length > 0}
     <div class="cards">
       {#each data.checking as clip (clip.id)}
-        <div class="card">
-          <span class="photo">
-            {#if clip.poster_url}
-              <img src={clip.poster_url} alt="" loading="lazy" />
-            {:else}
-              <span class="placeholder" data-placeholder></span>
-            {/if}
-            <span class="badge">{clipBadge(clip.duration_s, 1)}</span>
-          </span>
-          <span class="info">
-            <span class="who">
-              <span class="name">Checking who it is…</span>
-              <span class="time">{visitTime(clip.begin_at, clip.end_at, data.day)}</span>
-            </span>
-            <Chip text="Checking…" pending />
-          </span>
-        </div>
+        <VisitCard visit={pendingVisit(clip)} today={data.day} pending />
       {/each}
 
       {#each data.visits as visit (visit.id)}
@@ -240,16 +232,6 @@
   .champ-name { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
   .champ-sub { font-size: 13px; color: var(--ink-2); }
   img, .placeholder { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--sand); }
-  .card { display: flex; flex-direction: column; background: #fff; border-radius: 18px; overflow: hidden; color: var(--ink); }
-  .photo { position: relative; display: block; height: 170px; background: var(--sand); }
-  .badge {
-    position: absolute; left: 12px; bottom: 12px; font-size: 12px; font-weight: 600; border-radius: 999px;
-    padding: 5px 10px; background: rgba(46, 33, 22, 0.78); color: #fff;
-  }
-  .info { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 14px; }
-  .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .name { font-size: 17px; font-weight: 600; }
-  .time { font-size: 13px; color: var(--ink-2); }
   .again {
     min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line-strong);
     background: #fff; color: var(--robin-dark); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
@@ -258,9 +240,6 @@
   @media (min-width: 768px) {
     .brand { display: none; }
     .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
-    .photo { height: 140px; }
-    .name { font-size: 15px; }
-    .time { font-size: 12px; }
   }
   .retry {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
