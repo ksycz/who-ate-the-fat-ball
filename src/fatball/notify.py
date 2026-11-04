@@ -14,6 +14,7 @@ log = logging.getLogger("fatball.notify")
 TITLE = "Who Ate the Fat Ball?"
 SETTING = "notifications"
 SETTLE = timedelta(seconds=90)  # a visit may still grow while the bird is around
+RECENT = timedelta(minutes=30)  # an older visit (a backfill, a Retry) is marked without a banner
 SHOWN_NAMES = 3
 _SCRIPT = "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
 
@@ -44,15 +45,18 @@ def send_banner(title: str, body: str) -> None:
 
 def notifier_loop(conn, stop: threading.Event, now: Callable[[], datetime], send=send_banner,
                   interval_s: float = 60) -> None:
-    """Every pass: banner the bird visits that have settled, then mark them notified (also when banners are
-    off, so turning them back on doesn't flood). One failing pass never stops the loop."""
+    """Every pass: mark every settled visit notified, whatever its category, so a later move into Birds is never
+    "new". Only bird visits that ended within RECENT get a banner; older ones (a backfill, a Retry) are marked
+    silently. Visits are marked also when banners are off, so turning them back on doesn't flood. One failing
+    pass never stops the loop."""
     while not stop.is_set():
         try:
             current = now()
-            rows = repo.unnotified_bird_visits(conn, current - SETTLE)
+            rows = repo.unnotified_visits(conn, current - SETTLE, current - RECENT)
             if rows:
-                if (repo.get_setting(conn, SETTING) or "on") == "on":
-                    for message in messages(rows):
+                fresh = [r for r in rows if r["category"] == "birds" and r["is_recent"]]
+                if fresh and (repo.get_setting(conn, SETTING) or "on") == "on":
+                    for message in messages(fresh):
                         try:
                             send(TITLE, message)
                         except Exception:  # one lost banner must not make the others repeat every pass

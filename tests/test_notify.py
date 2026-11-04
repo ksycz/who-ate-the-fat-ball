@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from fatball import notify
-from fatball.library import repo
+from fatball.library import corrections, repo
 from fatball.library.db import connect
 from fatball.library.visits import assign_visit
 from fatball.recognition.matcher import Verdict
@@ -120,3 +120,32 @@ def test_send_banner_never_raises(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fail)
     notify.send_banner("t", "b")
+
+
+def test_old_clip_recognised_now_is_marked_without_a_banner(conn):
+    month_ago = START - timedelta(days=30)
+    add_visit(conn, "Parus major", begin=month_ago)  # a backfill: also the species' first sighting
+    assert run_one_pass(conn, START, lambda *a: None) == []
+    assert conn.execute("SELECT COUNT(*) FROM visit WHERE notified_at IS NULL").fetchone()[0] == 0
+
+
+def test_other_visit_moved_to_birds_gets_no_banner(conn):
+    cam = repo.upsert_camera(conn, "feeder", None, None)
+    cid = repo.add_clip(conn, cam, "/other.h265", START, START + timedelta(seconds=10), "h264", 1)
+    verdict = Verdict("other", None, 0.9, [], "nothing", None)
+    repo.set_recognition(conn, cid, best_frame_path="f.jpg", verdict_json=verdict_to_json(verdict), recognized_at=START)
+    visit_id = assign_visit(conn, repo.get_clip(conn, cid), verdict)
+    assert run_one_pass(conn, START + timedelta(minutes=5), lambda *a: None) == []
+    corrections.apply_many(conn, [visit_id], corrections.Change(category="birds", teach=False))
+    assert run_one_pass(conn, START + timedelta(minutes=6), lambda *a: None) == []
+
+
+def test_retrying_an_old_clip_gets_no_banner(conn):
+    month_ago = START - timedelta(days=30)
+    add_visit(conn, "Parus major", begin=month_ago)
+    run_one_pass(conn, START, lambda *a: None)
+    clip = repo.get_clip(conn, conn.execute("SELECT id FROM clip").fetchone()[0])
+    verdict = Verdict("birds", "Parus major", 0.9, [("Parus major", 0.9)], "species", None)
+    assign_visit(conn, clip, verdict)  # Retry: the clip leaves its visit and gets a fresh one
+    assert conn.execute("SELECT COUNT(*) FROM visit WHERE notified_at IS NULL").fetchone()[0] == 1
+    assert run_one_pass(conn, START + timedelta(minutes=1), lambda *a: None) == []

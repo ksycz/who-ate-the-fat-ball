@@ -233,18 +233,21 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.commit()
 
 
-def unnotified_bird_visits(conn: sqlite3.Connection, settled_before: datetime) -> list[sqlite3.Row]:
-    """Bird visits not yet announced that ended at or before `settled_before`, oldest first, with the English
-    `species_name` (None for an Unknown bird) and `is_new_species` (the species' first sighting is this visit)."""
+def unnotified_visits(
+    conn: sqlite3.Connection, settled_before: datetime, recent_after: datetime
+) -> list[sqlite3.Row]:
+    """Visits of every category not yet announced that ended at or before `settled_before`, oldest first, with
+    `category`, the English `species_name` (None for no species), `is_new_species` (the species' first
+    sighting is this visit) and `is_recent` (it ended at or after `recent_after`)."""
     return conn.execute(
-        "SELECT v.id, v.started_at, v.ended_at, n.name AS species_name, "
+        "SELECT v.id, v.category, v.started_at, v.ended_at, n.name AS species_name, "
         "COALESCE(julianday(s.first_seen_at) BETWEEN julianday(v.started_at) AND julianday(v.ended_at), 0) "
-        "AS is_new_species "
+        "AS is_new_species, julianday(v.ended_at) >= julianday(?) AS is_recent "
         "FROM visit v LEFT JOIN species s ON s.id = v.species_id "
         "LEFT JOIN species_name n ON n.species_id = s.id AND n.lang = 'en' "
-        "WHERE v.category = 'birds' AND v.notified_at IS NULL AND julianday(v.ended_at) <= julianday(?) "
+        "WHERE v.notified_at IS NULL AND julianday(v.ended_at) <= julianday(?) "
         "ORDER BY v.started_at, v.id",
-        (iso(settled_before),),
+        (iso(recent_after), iso(settled_before)),
     ).fetchall()
 
 
