@@ -24,8 +24,8 @@ def test_migration_005_adds_columns_and_marks_old_visits_notified(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert SCHEMA_VERSION == 5
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+    assert SCHEMA_VERSION == 6
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
     assert conn.execute("SELECT deleted_at FROM clip").fetchone()[0] is None
     row = conn.execute("SELECT started_at, notified_at FROM visit").fetchone()
     assert row["notified_at"] == row["started_at"] == "2026-11-01T08:00:00+01:00"

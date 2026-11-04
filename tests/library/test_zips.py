@@ -86,7 +86,7 @@ def test_plan_makes_names_unique_and_labels(conn, media, cam):
     _, u = add_visit(conn, media, cam, t + timedelta(minutes=60), Verdict("birds", None, 0.3, [], "unknown", None))
     _, e = add_visit(conn, media, cam, t + timedelta(minutes=90), Verdict("other", None, 0.9, [], "nothing", None))
     _, p = add_visit(conn, media, cam, t + timedelta(minutes=120), Verdict("other", None, 0.9, [], "person", None))
-    _, f = add_visit(conn, media, cam, t + timedelta(minutes=150), sure(FOX, "other_animals"))
+    _, f = add_visit(conn, media, cam, t + timedelta(minutes=150), sure(FOX, "other"))
     plan = zips.plan_zip(conn, media, visit_ids=list(dict.fromkeys([a, b, d, u, e, p, f])))
     names = [n for n, _ in plan.entries if n.endswith(".mp4")]
     assert len(set(names)) == len(names) and "2026-11-02 09-12 Great tit (2).mp4" in names
@@ -137,7 +137,7 @@ def test_stream_skips_a_file_gone_since_the_plan(conn, media, cam, caplog):
 def test_day_zip_for_category(conn, media, cam):
     t = datetime(2026, 11, 2, 9, 0)
     add_visit(conn, media, cam, t)
-    add_visit(conn, media, cam, t + timedelta(hours=1), sure(FOX, "other_animals"))
+    add_visit(conn, media, cam, t + timedelta(hours=1), sure(FOX, "other"))
     add_visit(conn, media, cam, t + timedelta(days=1))
     plan = zips.plan_zip(conn, media, day=date(2026, 11, 2), category="birds")
     assert plan.filename == "fat-ball-2026-11-02.zip"

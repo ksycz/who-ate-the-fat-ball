@@ -146,7 +146,7 @@ describe("Birds › All visits", () => {
 
   it("does not show the switch on other lists", () => {
     serve([]);
-    render(VisitList, { kind: "other_animals" });
+    render(VisitList, { kind: "other" });
     expect(screen.queryByRole("group", { name: "View" })).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ from fatball.recognition.matcher import DET_MIN, Example
 
 # downloading: row reserved, file still coming (raw_path NULL); downloaded: raw file complete at raw_path.
 Status = Literal["downloading", "downloaded", "processing", "ready", "failed"]
-Category = Literal["birds", "other_animals", "other"]
+Category = Literal["birds", "other"]
 _STATUSES = ("downloading", "downloaded", "processing", "ready", "failed")
 _PATH_COLUMNS = frozenset(
     {"original_path", "web_path", "poster_path", "preview_path", "raw_path", "duration_s"}
@@ -283,13 +283,13 @@ def ensure_catalog(conn: sqlite3.Connection) -> None:
 
 
 def category_for(conn: sqlite3.Connection, scientific_name: str | None) -> Category:
-    """birds for a bird, other for a dog, other_animals for any other mammal, other for everything else."""
+    """birds for a bird, other for everything else (dogs, other animals, people, nothing)."""
     if scientific_name is None or scientific_name == DOG:
         return "other"
     row = conn.execute('SELECT "group" FROM species WHERE scientific_name = ?', (scientific_name,)).fetchone()
     if row is None:
         return "other"
-    return "birds" if row["group"] == "bird" else "other_animals"
+    return "birds" if row["group"] == "bird" else "other"
 
 
 @dataclass(frozen=True)
@@ -565,7 +565,7 @@ def list_visits(
 
 def sorted_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """How many visits are in each category, and how many are favourites."""
-    counts = {"birds": 0, "other_animals": 0, "other": 0}
+    counts = {"birds": 0, "other": 0}
     for r in conn.execute("SELECT category, COUNT(*) AS n FROM visit GROUP BY category"):
         counts[r["category"]] = r["n"]
     favourites = conn.execute("SELECT COUNT(*) FROM visit WHERE is_favourite = 1").fetchone()[0]

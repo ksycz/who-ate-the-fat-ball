@@ -17,8 +17,9 @@ test("Birds is grouped by day", async ({ page }) => {
   await expect(page.getByRole("link", { name: /Nuthatch/ })).toBeVisible();
 });
 
-test("Other animals lists the squirrel", async ({ page }) => {
+test("Other lists the squirrel, and the old Other animals link opens Other", async ({ page }) => {
   await page.goto("/other-animals");
+  await expect(page.getByRole("heading", { name: "Other", level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: /Red squirrel/ })).toBeVisible();
 });
 

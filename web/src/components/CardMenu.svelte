@@ -3,11 +3,11 @@
   import type { Category } from "../lib/api";
   import { CATEGORY_DOTS, CATEGORY_NAMES } from "../lib/format";
 
-  // The ⋯ menu on a visit card: move it to either of the other two categories.
+  // The ⋯ menu on a visit card: move it to the other category.
   // `button` is the ⋯ that opened it: clicking it is not "outside" (it toggles the menu itself).
   let { current, onchoose, onclose, button }: { current: Category; onchoose: (c: Category) => void; onclose: () => void; button?: HTMLElement } = $props();
 
-  const ALL: Category[] = ["birds", "other_animals", "other"];
+  const ALL: Category[] = ["birds", "other"];
   const targets = $derived(ALL.filter((c) => c !== current));
   let items: HTMLButtonElement[] = $state([]);
   let root: HTMLDivElement;

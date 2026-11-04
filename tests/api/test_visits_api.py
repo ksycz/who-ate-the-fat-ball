@@ -54,8 +54,8 @@ def labels(conn, clip_id):
 
 def test_list_visits_filters_and_paginates(local, conn, cam):
     ids = [add_visit(conn, cam, 200 * i, sure(GREAT if i % 2 == 0 else BLUE))[1] for i in range(4)]
-    add_visit(conn, cam, 3000, sure(FOX, category="other_animals"))
-    fox = local.get("/api/visits?category=other_animals").json()["items"]
+    add_visit(conn, cam, 3000, sure(FOX, category="other"))
+    fox = local.get("/api/visits?category=other").json()["items"]
     assert [v["species"]["scientific"] for v in fox] == [FOX]
     assert fox[0]["species"]["name"] == "red fox"
     got = local.get(f"/api/visits?species={GREAT}").json()["items"]
@@ -111,10 +111,10 @@ def test_patch_species_sets_category_and_labels_examples(local, conn, cam):
     r = local.patch(f"/api/visits/{v}", json={"species": FOX})
     assert r.status_code == 200 and len(r.json()["undo_token"]) == 22
     row = conn.execute("SELECT * FROM visit WHERE id = ?", (v,)).fetchone()
-    assert (row["category"], row["subject"], row["moved_by_user"]) == ("other_animals", "species", 1)
+    assert (row["category"], row["subject"], row["moved_by_user"]) == ("other", "species", 1)
     assert labels(conn, clip) == [(FOX, "correction")] * 2
     c = conn.execute("SELECT * FROM correction WHERE visit_id = ?", (v,)).fetchone()
-    assert (c["from_category"], c["to_category"]) == ("birds", "other_animals")
+    assert (c["from_category"], c["to_category"]) == ("birds", "other")
     assert local.get(f"/api/visits/{v}").json()["species"]["scientific"] == FOX
 
 
@@ -124,6 +124,14 @@ def test_patch_to_other_labels_nothing(local, conn, cam):
     row = conn.execute("SELECT * FROM visit WHERE id = ?", (v,)).fetchone()
     assert (row["category"], row["species_id"], row["subject"], row["moved_by_user"]) == ("other", None, "nothing", 1)
     assert labels(conn, clip) == [("nothing", "correction")]
+
+
+def test_patch_category_other_alone_is_an_unknown_other_and_teaches_nothing(local, conn, cam):
+    clip, v = add_visit(conn, cam, 0, sure(GREAT))  # "Other animal" in What is it?
+    assert local.patch(f"/api/visits/{v}", json={"category": "other"}).status_code == 200
+    row = conn.execute("SELECT * FROM visit WHERE id = ?", (v,)).fetchone()
+    assert (row["category"], row["species_id"], row["subject"], row["moved_by_user"]) == ("other", None, "unknown", 1)
+    assert all(label is None for label, _ in labels(conn, clip))
 
 
 def test_patch_dog_goes_to_other_and_category_only_drops_contradicting_species(local, conn, cam):
@@ -190,7 +198,7 @@ def test_undo_unknown_or_expired_token_404(local, conn, cam, clock):
     token = local.patch(f"/api/visits/{v}", json={"species": FOX}).json()["undo_token"]
     clock.advance(hours=24, seconds=1)
     assert local.post(f"/api/undo/{token}").status_code == 404
-    assert conn.execute("SELECT category FROM visit WHERE id = ?", (v,)).fetchone()[0] == "other_animals"
+    assert conn.execute("SELECT category FROM visit WHERE id = ?", (v,)).fetchone()[0] == "other"
     fresh = local.patch(f"/api/visits/{v}", json={"is_favourite": True}).json()["undo_token"]
     clock.advance(hours=23)
     assert local.post(f"/api/undo/{fresh}").status_code == 204

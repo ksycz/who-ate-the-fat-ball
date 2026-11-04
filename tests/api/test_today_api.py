@@ -54,7 +54,7 @@ def test_today_lists_visits_newest_first_with_champion(local, conn, cam):
     first = visit(conn, cam, TODAY)
     blue = visit(conn, cam, TODAY + timedelta(hours=1), BLUE)
     third = visit(conn, cam, TODAY + timedelta(hours=2))
-    fox = visit(conn, cam, TODAY + timedelta(hours=3), FOX, "other_animals")
+    fox = visit(conn, cam, TODAY + timedelta(hours=3), FOX, "other")
     body = local.get("/api/today").json()
     ids = [v["id"] for v in body["visits"]]
     assert ids[0] == fox and ids[1] == third and ids[-1] == first and len(ids) == 4
@@ -112,7 +112,7 @@ def test_species_lists_catalog_with_counts(local, conn, cam):
     visit(conn, cam, TODAY, BLUE)
     visit(conn, cam, TODAY + timedelta(hours=1), GREAT)
     visit(conn, cam, TODAY + timedelta(hours=2), GREAT)
-    visit(conn, cam, TODAY + timedelta(hours=3), FOX, "other_animals")
+    visit(conn, cam, TODAY + timedelta(hours=3), FOX, "other")
     rows = local.get("/api/species").json()
     assert len(rows) == conn.execute("SELECT COUNT(*) FROM species").fetchone()[0]
     assert set(rows[0]) == {"scientific", "name", "group", "visits", "last_seen_at"}
@@ -131,9 +131,9 @@ def test_species_lists_catalog_with_counts(local, conn, cam):
 
 def test_status_has_sorted_counts(local, conn, cam):
     visit(conn, cam, TODAY)
-    visit(conn, cam, TODAY + timedelta(hours=1), FOX, "other_animals")
+    visit(conn, cam, TODAY + timedelta(hours=1), FOX, "other")
     body = local.get("/api/status").json()
-    assert body["sorted"] == {"birds": 1, "other_animals": 1, "other": 0, "favourites": 0}
+    assert body["sorted"] == {"birds": 1, "other": 1, "favourites": 0}
 
 
 def test_visits_favourite_filter(local, conn, cam):

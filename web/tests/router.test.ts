@@ -9,7 +9,7 @@ describe("matchRoute", () => {
   it("names the fixed pages", () => {
     expect(matchRoute("/").name).toBe("today");
     expect(matchRoute("/birds").name).toBe("birds");
-    expect(matchRoute("/other-animals").name).toBe("other-animals");
+    expect(matchRoute("/other-animals").name).toBe("other"); // the old section opens Other
     expect(matchRoute("/other").name).toBe("other");
     expect(matchRoute("/favourites").name).toBe("favourites");
     expect(matchRoute("/more").name).toBe("more");

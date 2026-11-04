@@ -8,12 +8,12 @@ test.beforeEach(async ({ request }) => {
 // More is a phone-only page, so every project looks at it at phone size.
 test.use({ viewport: { width: 390, height: 844 } });
 
-test("More → Other animals → back returns to More", async ({ page }) => {
+test("More → Other → back returns to More", async ({ page }) => {
   await page.goto("/more");
   await expect(page.getByRole("heading", { name: "More" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Favourites/ })).toBeVisible();
-  await page.getByRole("link", { name: /Other animals/ }).click();
-  await expect(page.getByRole("heading", { name: "Other animals", level: 1 })).toBeVisible();
+  await page.getByRole("link", { name: /^Other\b/ }).click();
+  await expect(page.getByRole("heading", { name: "Other", level: 1 })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("heading", { name: "More" })).toBeVisible();
 });

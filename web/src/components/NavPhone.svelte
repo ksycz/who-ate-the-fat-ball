@@ -6,7 +6,7 @@
   const items = [
     { label: "Today", href: "/", icon: "Today", names: ["today"] },
     { label: "Videos", href: "/videos", icon: "Videos", names: ["videos"] },
-    { label: "Birds", href: "/birds", icon: "Birds", names: ["birds", "birds-species", "species", "other-animals", "other"] },
+    { label: "Birds", href: "/birds", icon: "Birds", names: ["birds", "birds-species", "species", "other"] },
     { label: "Stats", href: "/stats", icon: "Stats", names: ["stats"] },
     { label: "More", href: "/more", icon: "More", names: ["more", "favourites", "status", "unlock", "setup"] },
   ] as const;

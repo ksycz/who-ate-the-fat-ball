@@ -28,7 +28,7 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
 - **Demo mode** with a fake camera and generated clips, so you can try it without any hardware.
 - **Bird recognition on your own Mac**:
   - A detector finds the animals and people in each new clip. Each animal is then matched against examples you labelled yourself.
-  - The species is named only when the match is clear; otherwise the clip is "Unknown bird". Dogs and people go to Other.
+  - The species is named only when the match is clear; otherwise the clip is "Unknown bird". Dogs, other animals and people go to Other.
   - Clips less than a minute apart with the same visitor are grouped into a visit.
   - You can correct a visit through the API, and the correction teaches the matcher straight away. Undo takes it back.
   - On the owner's 63 hand-labelled clips, it put 59 in the right section and named 13 of 17 clear birds.
@@ -36,7 +36,7 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
   - On the real camera, new clips were recognised a median of 13 s after download.
 - **A gallery on your phone, iPad and Mac** at `http://<your Mac's name>.local:8080`:
   - **Today**: the day's visits, the fat-ball champion, a banner for a new species and the camera's status.
-  - **Birds, Other animals, Other and Favourites**: every visit, grouped by day.
+  - **Birds, Other and Favourites**: every visit, grouped by day. Other holds dogs, other animals, people and empty clips.
   - **A visit**: play its clips, mark it as a favourite, download it, and fix a wrong name with "What is it?" (with Undo).
   - **Videos**: one clip after another, full screen on a phone and as a light page on a Mac, filtered by species.
   - **By species**: a card for each bird seen (switch Birds to **By species**), opening every visit of that bird.

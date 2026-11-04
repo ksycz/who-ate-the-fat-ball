@@ -177,12 +177,12 @@ def test_last_visitor_is_newest_bird_before_day(conn, cam):
 def test_sorted_counts(conn, cam):
     _, a = visit_at(conn, cam, at(8), sure(GREAT))
     visit_at(conn, cam, at(9), sure(BLUE))
-    visit_at(conn, cam, at(10), sure("Vulpes vulpes", category="other_animals"))
+    visit_at(conn, cam, at(10), sure("Vulpes vulpes", category="other"))
     visit_at(conn, cam, at(11), sure(DOG, category="other"))
     visit_at(conn, cam, at(12), sure(DOG, category="other"))
     conn.execute("UPDATE visit SET is_favourite = 1 WHERE id = ?", (a,))
     conn.commit()
-    assert repo.sorted_counts(conn) == {"birds": 2, "other_animals": 1, "other": 2, "favourites": 1}
+    assert repo.sorted_counts(conn) == {"birds": 2, "other": 3, "favourites": 1}
 
 
 def test_visit_row_has_duration_poster_and_corrected(conn, cam):
@@ -232,8 +232,8 @@ def test_champion_photo_comes_from_most_confident_visit(conn, cam):
 
 def test_species_overview_orders_mammals_after_birds_by_visits(conn, cam):
     visit_at(conn, cam, at(8), sure(DOG, category="other"))
-    visit_at(conn, cam, at(10), sure(SQUIRREL, category="other_animals"))
-    visit_at(conn, cam, at(12), sure(SQUIRREL, category="other_animals"))
+    visit_at(conn, cam, at(10), sure(SQUIRREL, category="other"))
+    visit_at(conn, cam, at(12), sure(SQUIRREL, category="other"))
     groups = [(r["scientific_name"], r["grp"], r["visits"]) for r in repo.species_overview(conn)]
     mammals = [i for i, g in enumerate(groups) if g[1] != "bird"]
     assert min(mammals) > max(i for i, g in enumerate(groups) if g[1] == "bird")

@@ -126,7 +126,7 @@ class Seeder:
         for hour, minute, species in ((16, 20, GREAT), (17, 5, GREAT), (17, 40, BLUE)):
             self.visit(at(YESTERDAY, hour, minute), sure(species), base="b" if species == BLUE else "a")
         if not empty:
-            self.visit(at(EARLIER, 8, 15), sure(SQUIRREL, "other_animals", 0.81), base="c")
+            self.visit(at(EARLIER, 8, 15), sure(SQUIRREL, "other", 0.81), base="c")
             self.visit(at(EARLIER, 9, 5), sure(DOG, "other", 0.88), base="c")
             self.visit(at(EARLIER, 10, 40), EMPTY_CLIP, base="c")
             blue_alt = ((BLUE, 0.31),)

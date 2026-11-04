@@ -58,7 +58,6 @@ describe("visitName", () => {
   });
   it("names unknowns by category", () => {
     expect(visitName(visit({ category: "birds", subject: "unknown" }))).toBe("Unknown bird");
-    expect(visitName(visit({ category: "other_animals", subject: "unknown" }))).toBe("Unknown animal");
   });
   it("names other things", () => {
     expect(visitName(visit({ category: "other", subject: "person" }))).toBe("Person");
@@ -171,7 +170,7 @@ describe("plural and correctionText", () => {
   it("correctionText_says_moved_only_when_the_list_changes", async () => {
     const { correctionText } = await import("../src/lib/format");
     expect(correctionText("birds", "other", "Dog")).toBe("Moved to Other");
-    expect(correctionText("birds", "other_animals", "x")).toBe("Moved to Other animals");
+    expect(correctionText("birds", "other", "x")).toBe("Moved to Other");
     expect(correctionText("birds", "birds", "Blue tit")).toBe("Changed to Blue tit");
   });
 });

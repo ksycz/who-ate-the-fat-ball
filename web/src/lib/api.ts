@@ -38,7 +38,7 @@ export function send<T>(method: string, path: string, body?: unknown): Promise<T
   return request<T>(method, path, body);
 }
 
-export type Category = "birds" | "other_animals" | "other";
+export type Category = "birds" | "other";
 export type CameraState = "ok" | "asleep" | "problem";
 
 export interface SpeciesRef {
@@ -133,7 +133,7 @@ export interface Status {
   now: string; // the Mac's clock when it answered, ISO with its UTC offset
   local: boolean; // the request comes from the Mac itself
   camera: Camera;
-  sorted: { birds: number; other_animals: number; other: number; favourites: number };
+  sorted: { birds: number; other: number; favourites: number };
   queue: { downloaded: number; processing: number; failed: number };
   recognition: { pending: number; old_waiting: number; errors: number; model: boolean; examples: number };
   disk: { free_bytes: number; low: boolean };

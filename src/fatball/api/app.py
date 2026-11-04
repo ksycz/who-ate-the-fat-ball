@@ -63,13 +63,13 @@ class VisitPatch(BaseModel):
     """`species` present as null means 'no species'; absent means unchanged."""
 
     species: str | None = None
-    category: Literal["birds", "other_animals", "other"] | None = None
+    category: Literal["birds", "other"] | None = None
     is_favourite: bool | None = None
 
 
 class BulkPatch(BaseModel):
     visit_ids: Annotated[list[int], Field(min_length=1, max_length=500)]
-    category: Literal["birds", "other_animals", "other"] | None = None
+    category: Literal["birds", "other"] | None = None
     is_favourite: bool | None = None
 
 
@@ -82,7 +82,7 @@ class ZipBody(BaseModel):
 
     visit_ids: Annotated[list[int], Field(min_length=1)] | None = None
     day: date | None = None
-    category: Literal["birds", "other_animals", "other"] | None = None
+    category: Literal["birds", "other"] | None = None
     favourite: Literal[True] | None = None
 
 
@@ -300,7 +300,7 @@ def create_app(
         conn: Conn,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
-        category: Literal["birds", "other_animals", "other"] | None = None,
+        category: Literal["birds", "other"] | None = None,
         species: str | None = None,
         day: date | None = None,
         favourite: bool | None = None,

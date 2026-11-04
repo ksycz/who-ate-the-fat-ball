@@ -75,7 +75,7 @@ def test_busiest_is_largest_slot_column(conn, cam):
 def test_stats_birds_only_and_window(conn, cam):
     add_visit(conn, cam, day(1), GREAT)
     add_visit(conn, cam, day(2), BLUE)
-    add_visit(conn, cam, day(1), DOG, category="other_animals")
+    add_visit(conn, cam, day(1), DOG, category="other")
     add_visit(conn, cam, day(29), GREAT)  # outside 4 weeks (28 days: today and the 27 before)
     add_visit(conn, cam, day(27), None)  # unknown bird: a visit, not a species
     s = stats.summary(conn, TODAY, 4)
@@ -100,7 +100,7 @@ def test_species_all_and_order_and_all_time_fields(conn, cam):
     add_visit(conn, cam, day(1), GREAT)
     add_visit(conn, cam, day(2), GREAT)
     add_visit(conn, cam, day(1), BLUE)
-    add_visit(conn, cam, day(1), DOG, category="other_animals")
+    add_visit(conn, cam, day(1), DOG, category="other")
     add_visit(conn, cam, day(1), None)
     allp = stats.species_for_period(conn, TODAY, "all")
     assert [(r["scientific"], r["visits"]) for r in allp] == [(GREAT, 3), (BLUE, 1)]
@@ -136,7 +136,7 @@ def test_videos_skip_visits_without_web_video(conn, cam):
     with_video = add_visit(conn, cam, day(1))
     add_visit(conn, cam, day(2), video=False)
     add_visit(conn, cam, day(3), deleted=True)
-    add_visit(conn, cam, day(1), DOG, category="other_animals")
+    add_visit(conn, cam, day(1), DOG, category="other")
     rows = stats.videos(conn, 10, None, None)
     assert [r["id"] for r in rows] == [with_video]
     assert rows[0]["video_path"].endswith(".mp4") and rows[0]["video_clip_id"] is not None
@@ -161,7 +161,7 @@ def test_top_species_last_30_days(conn, cam):
     add_visit(conn, cam, day(3), GREAT)
     add_visit(conn, cam, day(30), GREAT)  # outside
     add_visit(conn, cam, day(30), GREAT)
-    add_visit(conn, cam, day(1), DOG, category="other_animals")
+    add_visit(conn, cam, day(1), DOG, category="other")
     assert stats.top_species(conn, TODAY) == [
         {"scientific": BLUE, "name": "blue tit"}, {"scientific": GREAT, "name": "great tit"},
     ]

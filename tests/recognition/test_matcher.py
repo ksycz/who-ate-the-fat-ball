@@ -10,7 +10,7 @@ SPARROW = "Passer domesticus"
 FOX = "Vulpes vulpes"
 DIM = 8
 AXIS = {GREAT: 0, BLUE: 1, SPARROW: 2, DOG: 3, "nothing": 4, FOX: 5}
-CATEGORY = {GREAT: "birds", BLUE: "birds", SPARROW: "birds", DOG: "other", FOX: "other_animals"}
+CATEGORY = {GREAT: "birds", BLUE: "birds", SPARROW: "birds", DOG: "other", FOX: "other"}
 BOX = (0.1, 0.1, 0.5, 0.5)
 
 
