@@ -13,7 +13,7 @@ A free, local app for bird-feeder cameras: it collects the clips for you and tel
 | ![Videos on a Mac, one clip at a time](docs/screenshots/mac-videos.png) | ![Videos on a phone, a full-screen feed](docs/screenshots/phone-videos.png) |
 | ![Stats on a Mac, with a heatmap of busy times](docs/screenshots/mac-stats.png) | ![Stats on a phone](docs/screenshots/phone-stats.png) |
 
-<sub>Screenshots from demo mode, with generated test-pattern clips.</sub>
+<sub>Screenshots from demo mode, with plain-colour placeholder clips instead of real footage.</sub>
 
 ## The problem
 

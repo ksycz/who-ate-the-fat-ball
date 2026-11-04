@@ -35,7 +35,7 @@ Not confirmed by the owner yet:
 
 ## Screenshots
 
-From demo mode (`uv run fatball demo`), with generated test-pattern clips, never real footage.
+From demo mode (`uv run fatball demo`), with plain-colour placeholder clips, never real footage.
 
 | Mac: Videos | Mac: Stats |
 |---|---|
