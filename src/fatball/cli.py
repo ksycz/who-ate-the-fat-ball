@@ -38,7 +38,7 @@ MIN_CAMERA_PASSWORD = 6
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fatball", description="Who Ate the Fat Ball? Bird-feeder camera app.")
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import,recognize-old,notifications}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{serve,demo,setup,set-camera-password,examples-import,recognize-old,recheck-empty,notifications}")
     serve = sub.add_parser("serve", help="run the camera watcher, the converter and the web app")
     serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all, for the LAN)")
     serve.add_argument("--port", type=int, default=8080)
@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--background", choices=("on", "off"),
                       help="whether the app recognises older clips by itself (off: only new ones)")
     old.add_argument("--newest-first", action="store_true", help="with --limit: take the newest clips first")
+    sub.add_parser("recheck-empty", help="recognise the clips of empty visits again (after a recognition fix); "
+                                         "visits you moved stay as they are")
     note = sub.add_parser("notifications", help="switch Mac banners for new bird visits on or off "
                                                 "(no argument: show the current state)")
     note.add_argument("state", nargs="?", choices=("on", "off"))
@@ -82,6 +84,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_examples_import(settings, args.csv, detector_loader=model_loader(settings))
     if args.command == "notifications":
         return run_notifications(Settings.load(), args.state)
+    if args.command == "recheck-empty":
+        return run_recheck_empty(Settings.load())
     if args.command == "recognize-old":
         if args.limit is None and args.newest_first:
             build_parser().error("--newest-first only goes with --limit")
@@ -93,6 +97,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         serve(Settings.load(), host=args.host, port=args.port)
     else:
         run_demo(host=args.host, port=args.port)
+    return 0
+
+
+def run_recheck_empty(settings: Settings) -> int:
+    """Queue the clips of every empty visit (not moved by the owner) for recognition; the app does them."""
+    conn = open_library(settings)
+    try:
+        n = repo.requeue_empty_visits(conn)
+    finally:
+        conn.close()
+    print(f"Queued {n} clips from empty visits to be recognised again. The app does them in the background "
+          "while `fatball serve` runs (about a second each). Visits you moved yourself stay as they are.")
     return 0
 
 
