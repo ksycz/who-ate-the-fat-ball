@@ -1,7 +1,9 @@
 name: CI
 
 on:
+  # PR branches are checked once, by their pull request; pushes are checked only on main.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
