@@ -1,4 +1,9 @@
-import { expect, isPhone, test, BUSY } from "./helpers";
+import { expect, isPhone, reseed, test, BUSY } from "./helpers";
+
+// Playing a visit marks it watched (and clears the New species banner), so start from the seeded day, whatever ran before.
+test.beforeEach(async ({ request }) => {
+  await reseed(request);
+});
 
 const GREAT = "Parus major";
 

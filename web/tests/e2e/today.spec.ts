@@ -1,4 +1,9 @@
-import { expect, isPhone, PROBLEM, QUIET, test } from "./helpers";
+import { expect, isPhone, PROBLEM, QUIET, reseed, test } from "./helpers";
+
+// Playing a visit marks it watched (and clears the New species banner), so start from the seeded day, whatever ran before.
+test.beforeEach(async ({ request }) => {
+  await reseed(request);
+});
 
 test("a busy day: champion, new species, checking and failed clips", async ({ page }) => {
   await page.goto("/");
