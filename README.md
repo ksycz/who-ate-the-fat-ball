@@ -5,11 +5,13 @@
 
 A free, local app for bird-feeder cameras: it collects the clips for you and tells you who has been visiting. No ads, no cloud, no false alarms.
 
-> **Status: phase 1, gallery part 1.** Clip ingest, bird recognition and a gallery you can open on your phone, iPad or Mac work today. Videos, Stats and bulk tools come in Plan 4.
+> **Status: phase 1 complete.** Clip ingest, bird recognition, and a gallery with Videos, Stats and bulk tools work today on your phone, iPad or Mac. Phase 2 moves the app to a Raspberry Pi and adds phone notifications.
 
 | Mac | Phone |
 |---|---|
 | ![Today on a Mac, a grid of visits](docs/screenshots/mac-today.png) | ![Today on a phone](docs/screenshots/phone-today.png) |
+| ![Videos on a Mac, one clip at a time](docs/screenshots/mac-videos.png) | ![Videos on a phone, a full-screen feed](docs/screenshots/phone-videos.png) |
+| ![Stats on a Mac, with a heatmap of busy times](docs/screenshots/mac-stats.png) | ![Stats on a phone](docs/screenshots/phone-stats.png) |
 
 <sub>Screenshots from demo mode, with generated test-pattern clips.</sub>
 
@@ -36,12 +38,18 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
   - **Today**: the day's visits, the fat-ball champion, a banner for a new species and the camera's status.
   - **Birds, Other animals, Other and Favourites**: every visit, grouped by day.
   - **A visit**: play its clips, mark it as a favourite, download it, and fix a wrong name with "What is it?" (with Undo).
+  - **Videos**: one clip after another, full screen on a phone and as a light page on a Mac, filtered by species.
+  - **By species**: a card for each bird seen (switch Birds to **By species**), opening every visit of that bird.
+  - **Select and move**: pick many visits and move them to another section at once (with Undo), or drag them onto a section on the Mac. Empty clips can be deleted.
+  - **Zip downloads**: download the selected visits, or a whole day, as one .zip file.
+  - **Stats**: visits, species and the busiest time over the last four weeks, a heatmap of busy hours and visits per bird.
+  - **Mac banners** for new bird visits and new species while the app runs.
   - Phones and iPads can look; changing anything needs the edit PIN (**More → Unlock editing**).
   - It can be added to the home screen, and works on a phone, an iPad and a big screen.
 
 ## What's coming
 
-- **Plan 4: the gallery, part 2.** Videos, By species, selecting and moving many visits, zip downloads, drag-and-drop on the Mac, Stats with a heatmap and a Mac notification for a new species.
+- **Phase 2:** run the app on a Raspberry Pi instead of the Mac, and send notifications to your phone.
 
 ## Try the demo
 
@@ -143,7 +151,7 @@ Before the app upgrades an existing library to a newer format, it saves a copy n
 
 ## Design process
 
-The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques informed the gallery; [Plan 3 results](docs/plan-3-results.md) has the device trial and more screenshots.
+The project started from a written [design spec](docs/superpowers/specs/2026-10-31-who-ate-the-fat-ball-design.md), and each phase has an implementation plan in [docs/superpowers/plans/](docs/superpowers/plans/). The design prototypes and critiques informed the gallery; [Plan 3 results](docs/plan-3-results.md) and [Plan 4 results](docs/plan-4-results.md) have the device trials and more screenshots.
 
 ## Development
 
