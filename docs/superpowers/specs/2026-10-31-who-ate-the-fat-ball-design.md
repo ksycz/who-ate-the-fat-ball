@@ -358,9 +358,9 @@ The prototypes are the reference for layout. This section fixes the behaviour.
 | Phase | Scope |
 |---|---|
 | **1 (this spec)** | Everything above: Mac service, iCSee camera, gallery on Mac, Android and iPad, English names, Mac banner |
-| 2 | Raspberry Pi, always on; phone notifications for new birds only |
+| 2 | Raspberry Pi, always on; phone notifications for new birds only; dark mode (follows the device setting) |
 | 3 | Learning from the owner's corrections; Czech and Polish names |
-| Later | Optional hosted gallery, other cameras (RTSP/ONVIF), dark mode |
+| Later | Optional hosted gallery, other cameras (RTSP/ONVIF) |
 
 ## 16. Portfolio use (added 2026-10-31)
 

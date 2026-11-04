@@ -5,7 +5,7 @@
 
 A free, local app for bird-feeder cameras: it collects the clips for you and tells you who has been visiting. No ads, no cloud, no false alarms.
 
-> **Status: phase 1 complete.** Clip ingest, bird recognition, and a gallery with Videos, Stats and bulk tools work today on your phone, iPad or Mac. Phase 2 moves the app to a Raspberry Pi and adds phone notifications.
+> **Status: phase 1 complete.** Clip ingest, bird recognition, and a gallery with Videos, Stats and bulk tools work today on your phone, iPad or Mac. Phase 2 moves the app to a Raspberry Pi and adds phone notifications and dark mode.
 
 | Mac | Phone |
 |---|---|
@@ -49,7 +49,12 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
 
 ## What's coming
 
-- **Phase 2:** run the app on a Raspberry Pi instead of the Mac, and send notifications to your phone.
+- **Phase 2:**
+  - Run the app all the time on a Raspberry Pi 5 instead of the Mac.
+  - Send a phone notification for new birds only.
+  - Add a dark mode that follows your device's setting.
+- **Phase 3:** learn from your corrections, and add Czech and Polish bird names.
+- **Later:** an optional hosted gallery, and other cameras (RTSP/ONVIF).
 
 ## Try the demo
 
