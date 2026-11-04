@@ -140,10 +140,10 @@ describe("Visit", () => {
   });
 
   it("or_maybe_toast_says_moved_to_when_category_changes", async () => {
-    serve(detail(), { category: "other_animals", species: { scientific: "Cyanistes caeruleus", name: "blue tit" } });
+    serve(detail(), { category: "other", species: { scientific: "Canis lupus familiaris", name: "dog" } });
     render(Visit);
     await fireEvent.click(await screen.findByRole("button", { name: "Blue tit · 4%" }));
-    await waitFor(() => expect(get(toast)).toEqual({ text: "Moved to Other animals", undoToken: "tok1" }));
+    await waitFor(() => expect(get(toast)).toEqual({ text: "Moved to Other", undoToken: "tok1" }));
   });
 
   it("favourite_toggle_patches_and_toasts", async () => {

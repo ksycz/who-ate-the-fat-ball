@@ -135,7 +135,7 @@ describe("Picker", () => {
 
   it("not_a_bird_options_send_exact_bodies", async () => {
     const cases: [string, object, string][] = [
-      ["Other animal", { category: "other_animals" }, "Moved to Other animals"],
+      ["Other animal", { category: "other" }, "Moved to Other"],
       ["Dog", { species: "Canis lupus familiaris" }, "Moved to Other"],
       ["Nothing", { species: null, category: "other" }, "Moved to Other"],
     ];

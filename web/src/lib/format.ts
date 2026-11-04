@@ -87,7 +87,6 @@ export function visitName(visit: Visit): string {
   if (visit.subject === "person") return "Person";
   if (visit.subject === "nothing") return "Empty clip";
   if (visit.category === "birds") return "Unknown bird";
-  if (visit.category === "other_animals") return "Unknown animal";
   if (visit.category === "other") return "Other"; // a plain move to Other: it could be anything, so not "Empty clip"
   return "Unknown";
 }
@@ -160,13 +159,11 @@ export function dayOf(at: string): string {
 // The colour dot beside each category (the same as in the side menu).
 export const CATEGORY_DOTS: Record<Category, string> = {
   birds: "var(--robin)",
-  other_animals: "var(--dot-animals)",
   other: "var(--dot-other)",
 };
 
 export const CATEGORY_NAMES: Record<Category, string> = {
   birds: "Birds",
-  other_animals: "Other animals",
   other: "Other",
 };
 

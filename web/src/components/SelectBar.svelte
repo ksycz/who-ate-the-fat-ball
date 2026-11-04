@@ -22,7 +22,7 @@
     ondelete?: () => void;
   } = $props();
 
-  const ALL: Category[] = ["birds", "other_animals", "other"];
+  const ALL: Category[] = ["birds", "other"];
 
   // A category list offers the other two; Favourites mixes them all, so it offers all three.
   const targets = $derived(ALL.filter((c) => kind === "favourites" || c !== kind));

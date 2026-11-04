@@ -14,10 +14,10 @@ def _columns(conn, table):
     return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def test_fresh_database_is_v5(tmp_path):
+def test_fresh_database_is_v6(tmp_path):
     conn = connect(tmp_path / "lib.db")
-    assert SCHEMA_VERSION == 5
-    assert _version(conn) == 5
+    assert SCHEMA_VERSION == 6
+    assert _version(conn) == 6
     assert {"recognized_at", "best_frame_path", "recognition_error", "verdict_json"} <= _columns(conn, "clip")
     assert "recognition_wanted" in _columns(conn, "clip")
     assert {"subject", "watched_at"} <= _columns(conn, "visit")
@@ -39,7 +39,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 5
+    assert _version(conn) == 6
     row = conn.execute("SELECT sd_path, recognized_at FROM clip").fetchone()
     assert row["sd_path"] == "/a"
     assert row["recognized_at"] is None
@@ -49,7 +49,7 @@ def test_v1_database_upgrades_and_keeps_clips(tmp_path):
 def test_migration_is_idempotent(tmp_path):
     connect(tmp_path / "lib.db").close()
     conn = connect(tmp_path / "lib.db")
-    assert _version(conn) == 5
+    assert _version(conn) == 6
     conn.close()
 
 
@@ -68,7 +68,7 @@ def test_category_rules(tmp_path):
     repo.ensure_catalog(conn)
     assert repo.category_for(conn, "Parus major") == "birds"
     assert repo.category_for(conn, DOG) == "other"
-    assert repo.category_for(conn, "Vulpes vulpes") == "other_animals"
+    assert repo.category_for(conn, "Vulpes vulpes") == "other"
     assert repo.category_for(conn, None) == "other"
     assert repo.category_for(conn, "nothing") == "other"
     assert repo.category_for(conn, "Unknown unknown") == "other"
@@ -107,7 +107,7 @@ def test_a_fresh_library_makes_no_backup(tmp_path):
     assert list(tmp_path.glob("*.bak")) == []
 
 
-def test_v2_database_upgrades_to_v5_and_keeps_clips(tmp_path):
+def test_v2_database_upgrades_to_v6_and_keeps_clips(tmp_path):
     path = tmp_path / "lib.db"
     _v1_library(path)
     raw = sqlite3.connect(path)
@@ -117,13 +117,13 @@ def test_v2_database_upgrades_to_v5_and_keeps_clips(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 5
+    assert _version(conn) == 6
     row = conn.execute("SELECT sd_path, recognition_wanted FROM clip").fetchone()
     assert (row["sd_path"], row["recognition_wanted"]) == ("/a", 0)
     conn.close()
 
 
-def test_v3_library_migrates_to_v5_with_backup(tmp_path):
+def test_v3_library_migrates_to_v6_with_backup(tmp_path):
     path = tmp_path / "library.sqlite"
     _v1_library(path)
     raw = sqlite3.connect(path)
@@ -136,7 +136,7 @@ def test_v3_library_migrates_to_v5_with_backup(tmp_path):
     raw.close()
 
     conn = connect(path)
-    assert _version(conn) == 5
+    assert _version(conn) == 6
     row = conn.execute("SELECT started_at, watched_at FROM visit").fetchone()
     assert (row["started_at"], row["watched_at"]) == ("a", None)
     assert conn.execute("SELECT sd_path FROM clip").fetchone()["sd_path"] == "/a"

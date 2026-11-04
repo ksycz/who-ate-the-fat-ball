@@ -15,7 +15,7 @@ function status(over: Partial<Status> = {}): Status {
     now: "2026-11-02T10:02:00+00:00",
     local: true,
     camera: { state: "ok", last_seen_at: "2026-11-02T10:00:00+00:00", last_error: null },
-    sorted: { birds: 41, other_animals: 3, other: 7, favourites: 12 },
+    sorted: { birds: 41, other: 7, favourites: 12 },
     queue: { downloaded: 2, processing: 1, failed: 0 },
     recognition: { pending: 4, old_waiting: 0, errors: 0, model: true, examples: 10 },
     disk: { free_bytes: 12_400_000_000, low: false },
@@ -55,8 +55,7 @@ describe("More", () => {
     await screen.findByText("41");
     const birds = screen.getByRole("link", { name: /Birds/ });
     expect(birds.getAttribute("href")).toBe("/birds");
-    expect(screen.getByRole("link", { name: /Other animals/ }).textContent).toContain("3");
-    expect(screen.getByRole("link", { name: /^Other\b(?! animals)/ }).textContent).toContain("7");
+    expect(screen.getByRole("link", { name: /^Other\b/ }).textContent).toContain("7");
     expect(screen.getByRole("link", { name: /Favourites/ }).getAttribute("href")).toBe("/favourites");
     expect(screen.getByRole("link", { name: /App status/ }).getAttribute("href")).toBe("/status");
     expect(screen.getByRole("link", { name: "Unlock editing" }).getAttribute("href")).toBe("/unlock");

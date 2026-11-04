@@ -15,7 +15,7 @@
   import VisitCard from "../components/VisitCard.svelte";
   import ZipConfirm from "../components/ZipConfirm.svelte";
 
-  type Kind = "birds" | "other_animals" | "other" | "favourites";
+  type Kind = "birds" | "other" | "favourites";
   // species: a scientific name, to list only that species' visits (kind is birds).
   let { kind, species = null }: { kind: Kind; species?: string | null } = $props();
 
@@ -31,13 +31,11 @@
   const PAGE = 50;
   const TITLES: Record<Kind, string> = {
     birds: "Birds",
-    other_animals: "Other animals",
     other: "Other",
     favourites: "Favourites",
   };
   const EMPTY: Record<Kind, string> = {
     birds: "No bird visits yet",
-    other_animals: "No other animals yet",
     other: "Nothing here: no dogs, people or empty clips",
     favourites: "No favourites yet. Tap ☆ on a visit to keep it here.",
   };

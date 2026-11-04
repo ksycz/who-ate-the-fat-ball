@@ -8,7 +8,6 @@ export type RouteName =
   | "birds"
   | "birds-species"
   | "species"
-  | "other-animals"
   | "other"
   | "favourites"
   | "more"
@@ -28,7 +27,7 @@ const FIXED: Record<string, RouteName> = {
   "/stats": "stats",
   "/birds": "birds",
   "/birds/species": "birds-species",
-  "/other-animals": "other-animals",
+  "/other-animals": "other", // the old Other animals section, now part of Other
   "/other": "other",
   "/favourites": "favourites",
   "/more": "more",

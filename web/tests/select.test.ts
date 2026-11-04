@@ -59,7 +59,7 @@ describe("movedText", () => {
   it("names a single visit, counts several", () => {
     expect(movedText(1, "other", "Great tit")).toBe("Great tit moved to Other");
     expect(movedText(1, "other")).toBe("1 visit moved to Other");
-    expect(movedText(3, "other_animals")).toBe("3 visits moved to Other animals");
+    expect(movedText(3, "birds")).toBe("3 visits moved to Birds");
   });
 });
 
@@ -86,8 +86,6 @@ describe("moveVisits", () => {
     expect(get(toast)?.text).toBe("Already in Other");
     await moveVisits([1], "birds");
     expect(get(toast)?.text).toBe("Already in Birds");
-    await moveVisits([1], "other_animals");
-    expect(get(toast)?.text).toBe("Already in Other animals");
   });
 
   it("refuses more than 500 at once without asking the Mac", async () => {
@@ -130,25 +128,23 @@ describe("SelectBar", () => {
     expect(screen.getByText("1 visit selected")).toBeTruthy();
   });
 
-  it("offers the two other categories to editors", async () => {
+  it("offers the other category to editors", async () => {
     canEdit.set(true);
     const onmove = vi.fn();
     render(SelectBar, { kind: "birds", count: 2, onmove, onzip: () => {} });
     await fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
     const group = screen.getByRole("group", { name: "Move to" });
-    expect(group.textContent).toContain("Other animals");
-    expect(group.textContent).toContain("Other");
-    expect(group.textContent).not.toContain("Birds");
-    await fireEvent.click(screen.getByRole("button", { name: "Other animals" }));
-    expect(onmove).toHaveBeenCalledWith("other_animals");
+    expect([...group.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Other"]);
+    await fireEvent.click(screen.getByRole("button", { name: "Other" }));
+    expect(onmove).toHaveBeenCalledWith("other");
   });
 
-  it("offers all three on Favourites", async () => {
+  it("offers both on Favourites", async () => {
     canEdit.set(true);
     render(SelectBar, { kind: "favourites", count: 2, onmove: () => {}, onzip: () => {} });
     await fireEvent.click(screen.getByRole("button", { name: "Move to…" }));
     const group = screen.getByRole("group", { name: "Move to" });
-    expect([...group.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Birds", "Other animals", "Other"]);
+    expect([...group.querySelectorAll("button")].map((b) => b.textContent?.trim())).toEqual(["Birds", "Other"]);
   });
 
   describe("on a wide screen", () => {
@@ -166,7 +162,6 @@ describe("SelectBar", () => {
       expect(screen.queryByRole("group", { name: "Move to" })).toBeNull();
       expect(document.querySelector("[aria-expanded]")).toBeNull();
       expect(screen.queryByRole("button", { name: "Move to Birds" })).toBeNull();
-      expect(screen.getByRole("button", { name: "Move to Other animals" })).toBeTruthy();
       await fireEvent.click(screen.getByRole("button", { name: "Move to Other" }));
       expect(onmove).toHaveBeenCalledWith("other");
     });

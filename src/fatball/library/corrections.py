@@ -19,7 +19,7 @@ from fatball.library.repo import category_for, iso
 from fatball.recognition.matcher import DET_MIN
 
 UNDO_TTL = timedelta(hours=24)
-CATEGORIES = ("birds", "other_animals", "other")
+CATEGORIES = ("birds", "other")
 NOTHING = "nothing"  # the label for a false box
 UNSET = object()  # a Change field left out: keep the current value
 
@@ -132,13 +132,13 @@ def _apply_in_tx(
     if change.is_favourite is not None:
         updates["is_favourite"] = int(change.is_favourite)
     if corrected:
-        # Only a taught choice says "nothing there": a plain move to Other could be a dog, a person or an
-        # empty clip, so it stays unknown and never becomes a deletable empty clip (R24).
-        empty = change.teach and category == "other"
+        # Only a taught "no species" says "nothing there": a plain move to Other could be a dog, another
+        # animal, a person or an empty clip, so it stays unknown and never becomes a deletable empty clip (R24).
+        empty = change.teach and category == "other" and species_given
         subject = "species" if scientific else (NOTHING if empty else "unknown")
         updates |= {"category": category, "species_id": species_id, "subject": subject, "moved_by_user": 1}
         if change.teach:  # a plain move must not teach the matcher or move the first sighting
-            label = scientific or (NOTHING if category == "other" else None)
+            label = scientific or (NOTHING if empty else None)
             if label is not None:
                 before["labelled"] = _label(conn, visit_id, label, now)
             if scientific:

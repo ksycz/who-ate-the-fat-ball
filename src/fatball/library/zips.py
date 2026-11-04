@@ -17,7 +17,7 @@ log = logging.getLogger("fatball.zips")
 MAX_VISITS = 500
 CHUNK = 1024 * 1024
 _OTHER_LABELS = {"nothing": "Empty clip", "person": "Person"}
-_ANIMAL_LABELS = {"birds": "Unknown bird", "other_animals": "Other animal"}
+_ANIMAL_LABELS = {"birds": "Unknown bird"}
 DOG = "Canis lupus familiaris"
 
 

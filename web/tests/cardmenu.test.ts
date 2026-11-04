@@ -26,26 +26,25 @@ afterEach(() => {
 });
 
 describe("CardMenu", () => {
-  it("lists the two other categories under a Move to heading", () => {
+  it("lists the other category under a Move to heading", () => {
     render(CardMenu, { current: "birds", onchoose: () => {}, onclose: () => {} });
     expect(screen.getByRole("menu")).toBeTruthy();
     expect(screen.getByText("Move to")).toBeTruthy();
-    expect(screen.getAllByRole("menuitem").map((i) => i.textContent?.trim())).toEqual(["Other animals", "Other"]);
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent?.trim())).toEqual(["Other"]);
   });
 
-  it("focuses the first item; arrows move between items; Enter chooses", async () => {
+  it("focuses the item; arrows keep it focused; choosing it moves", async () => {
     const onchoose = vi.fn();
-    render(CardMenu, { current: "birds", onchoose, onclose: () => {} });
-    const [first, second] = screen.getAllByRole("menuitem");
-    expect(document.activeElement).toBe(first);
-    await fireEvent.keyDown(first, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(second);
-    await fireEvent.keyDown(second, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(first);
-    await fireEvent.keyDown(first, { key: "ArrowUp" });
-    expect(document.activeElement).toBe(second);
-    await fireEvent.click(second);
-    expect(onchoose).toHaveBeenCalledWith("other");
+    render(CardMenu, { current: "other", onchoose, onclose: () => {} });
+    const [only] = screen.getAllByRole("menuitem");
+    expect(only.textContent?.trim()).toBe("Birds");
+    expect(document.activeElement).toBe(only);
+    await fireEvent.keyDown(only, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(only);
+    await fireEvent.keyDown(only, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(only);
+    await fireEvent.click(only);
+    expect(onchoose).toHaveBeenCalledWith("birds");
   });
 
   it("Escape asks to close", async () => {
@@ -124,12 +123,12 @@ describe("VisitCard ⋯ button", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(VisitCard, { visit, today: "2026-11-03" });
     await fireEvent.click(screen.getByRole("button", { name: "More actions for Great tit" }));
-    await fireEvent.click(screen.getByRole("menuitem", { name: "Other animals" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Other" }));
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/visits/bulk");
-    expect(JSON.parse(init.body as string)).toEqual({ visit_ids: [7], category: "other_animals" });
-    await vi.waitFor(() => expect(get(toast)?.text).toBe("Great tit moved to Other animals"));
+    expect(JSON.parse(init.body as string)).toEqual({ visit_ids: [7], category: "other" });
+    await vi.waitFor(() => expect(get(toast)?.text).toBe("Great tit moved to Other"));
   });
 });
 
@@ -137,12 +136,12 @@ describe("SortedInto drop targets", () => {
   it("a drop on another category moves; a drop on its own does nothing", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ undo_token: "t", changed: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    render(SortedInto, { sorted: { birds: 3, other_animals: 1, other: 0, favourites: 0 } as never });
+    render(SortedInto, { sorted: { birds: 3, other: 1, favourites: 0 } as never });
     dragged.set({ id: 7, category: "birds", name: "Great tit" });
     const birds = screen.getByRole("link", { name: /^Birds/ });
     await fireEvent.drop(birds);
     expect(fetchMock).not.toHaveBeenCalled();
-    const animals = screen.getByRole("link", { name: /^Other animals/ });
+    const animals = screen.getByRole("link", { name: /^Other/ });
     await fireEvent.dragOver(animals);
     expect(animals.classList.contains("over")).toBe(true);
     await fireEvent.drop(animals);
@@ -151,9 +150,9 @@ describe("SortedInto drop targets", () => {
   });
 
   it("a cancelled drag leaves no highlighted row", async () => {
-    render(SortedInto, { sorted: { birds: 3, other_animals: 1, other: 0, favourites: 0 } as never });
+    render(SortedInto, { sorted: { birds: 3, other: 1, favourites: 0 } as never });
     dragged.set({ id: 7, category: "birds", name: "Great tit" });
-    const animals = screen.getByRole("link", { name: /^Other animals/ });
+    const animals = screen.getByRole("link", { name: /^Other/ });
     await fireEvent.dragOver(animals);
     expect(animals.classList.contains("over")).toBe(true);
     dragged.set(null);

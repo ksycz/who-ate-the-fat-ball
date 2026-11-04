@@ -15,7 +15,7 @@
     category: Category;
   }
   const OTHERS: Other[] = [
-    { label: "Other animal", hint: "Squirrel, cat…", dot: "var(--dot-animals)", body: { category: "other_animals" }, category: "other_animals" },
+    { label: "Other animal", hint: "Squirrel, cat…", dot: "var(--dot-other)", body: { category: "other" }, category: "other" },
     { label: "Dog", hint: "Moves to Other", dot: "var(--dot-other)", body: { species: "Canis lupus familiaris" }, category: "other" },
     { label: "Nothing", hint: "Empty clip", dot: "var(--dot-other)", body: { species: null, category: "other" }, category: "other" },
   ];

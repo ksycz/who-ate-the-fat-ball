@@ -32,13 +32,12 @@
 
   const lists = {
     birds: "birds",
-    "other-animals": "other_animals",
     other: "other",
     favourites: "favourites",
   } as const;
 
   const listKind = $derived(
-    $route.name === "birds" || $route.name === "other-animals" || $route.name === "other" || $route.name === "favourites"
+    $route.name === "birds" || $route.name === "other" || $route.name === "favourites"
       ? lists[$route.name]
       : null,
   );

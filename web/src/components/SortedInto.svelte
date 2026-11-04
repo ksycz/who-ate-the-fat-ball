@@ -9,7 +9,6 @@
 
   const rows = $derived([
     { label: "Birds", href: "/birds", dot: "var(--robin)", count: sorted?.birds, name: "birds", category: "birds" as Category },
-    { label: "Other animals", href: "/other-animals", dot: "var(--dot-animals)", count: sorted?.other_animals, name: "other-animals", category: "other_animals" as Category },
     { label: "Other", href: "/other", dot: "var(--dot-other)", count: sorted?.other, name: "other", category: "other" as Category },
   ]);
 

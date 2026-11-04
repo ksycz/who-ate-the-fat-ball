@@ -67,7 +67,7 @@ def trio(conn, cam):
     _, b = add_visit(conn, cam, 1000, Verdict("birds", None, 0.4, [], "unknown", None))
     _, c = add_visit(conn, cam, 2000, Verdict("other", None, 0.9, [], "nothing", None))
     corrections.apply(conn, a, Change(is_favourite=True))
-    corrections.apply(conn, c, Change(category="other"))
+    corrections.apply(conn, c, Change(species=None, category="other"))
     return ca, a, b, c
 
 

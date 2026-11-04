@@ -137,13 +137,7 @@ describe("VisitList", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Favourites" })).toBeTruthy();
   });
 
-  it("other_animals_and_other_use_their_category", async () => {
-    serve();
-    render(VisitList, { kind: "other_animals" });
-    await screen.findAllByRole("link", { name: /Great tit/ });
-    expect(visitUrls()[0]).toContain("category=other_animals");
-    expect(screen.getByRole("heading", { level: 1, name: "Other animals" })).toBeTruthy();
-    cleanup();
+  it("other_uses_its_category", async () => {
     serve();
     render(VisitList, { kind: "other" });
     await screen.findAllByRole("link", { name: /Great tit/ });
@@ -154,7 +148,6 @@ describe("VisitList", () => {
   it("empty_state_texts", async () => {
     const cases = [
       ["birds", "No bird visits yet"],
-      ["other_animals", "No other animals yet"],
       ["other", "Nothing here: no dogs, people or empty clips"],
       ["favourites", "No favourites yet. Tap ☆ on a visit to keep it here."],
     ] as const;
