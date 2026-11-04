@@ -132,7 +132,10 @@ def _apply_in_tx(
     if change.is_favourite is not None:
         updates["is_favourite"] = int(change.is_favourite)
     if corrected:
-        subject = "species" if scientific else (NOTHING if category == "other" else "unknown")
+        # Only a taught choice says "nothing there": a plain move to Other could be a dog, a person or an
+        # empty clip, so it stays unknown and never becomes a deletable empty clip (R24).
+        empty = change.teach and category == "other"
+        subject = "species" if scientific else (NOTHING if empty else "unknown")
         updates |= {"category": category, "species_id": species_id, "subject": subject, "moved_by_user": 1}
         if change.teach:  # a plain move must not teach the matcher or move the first sighting
             label = scientific or (NOTHING if category == "other" else None)

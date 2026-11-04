@@ -78,10 +78,29 @@ def test_bulk_move_then_undo_restores_each_visit(conn, trio):
     assert changed == 2
     for v in (a, b):
         category, species_id, subject, _fav, moved = snap(conn, v)
-        assert category == "other" and moved == 1 and subject == "nothing" and species_id is None
+        assert category == "other" and moved == 1 and subject == "unknown" and species_id is None
     assert snap(conn, c) == before[c]
     corrections.undo(conn, token, T0)
     assert {v: snap(conn, v) for v in (a, b, c)} == before
+
+
+def test_plain_move_to_other_is_not_an_empty_clip(conn, trio, tmp_path):
+    """R24: only the picker's taught choice (or the recogniser) makes an empty clip."""
+    from fatball.library import cleanup
+
+    _, a, b, _ = trio
+    corrections.apply_many(conn, [a], Change(category="other", teach=False), T0)
+    corrections.apply(conn, b, Change(category="other", teach=False), T0)
+    assert [v["id"] for v in repo.list_visits(conn, None, category="other", only="empty")] == [trio[3]]
+    for v in (a, b):
+        with pytest.raises(cleanup.NotEmpty):
+            cleanup.delete_empty_visits(conn, tmp_path, [v], T0)
+
+
+def test_taught_move_to_other_is_an_empty_clip(conn, trio):
+    _, a, _, _ = trio
+    corrections.apply(conn, a, Change(species=None, category="other"), T0)
+    assert snap(conn, a)[2] == "nothing"
 
 
 def test_bulk_move_does_not_label_detections(conn, trio):

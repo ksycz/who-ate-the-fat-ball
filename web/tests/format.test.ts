@@ -65,6 +65,9 @@ describe("visitName", () => {
     expect(visitName(visit({ category: "other", subject: "species", species: { scientific: "Canis lupus familiaris", name: "dog" } }))).toBe("Dog");
     expect(visitName(visit({ category: "other", subject: "nothing" }))).toBe("Empty clip");
   });
+  it("calls a plain move to Other just Other, never an empty clip", () => {
+    expect(visitName(visit({ category: "other", subject: "unknown" }))).toBe("Other");
+  });
   it("falls back to the scientific name", () => {
     expect(visitName(visit({ species: { scientific: "Parus major", name: null } }))).toBe("Parus major");
   });

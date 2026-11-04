@@ -88,6 +88,7 @@ export function visitName(visit: Visit): string {
   if (visit.subject === "nothing") return "Empty clip";
   if (visit.category === "birds") return "Unknown bird";
   if (visit.category === "other_animals") return "Unknown animal";
+  if (visit.category === "other") return "Other"; // a plain move to Other: it could be anything, so not "Empty clip"
   return "Unknown";
 }
 
