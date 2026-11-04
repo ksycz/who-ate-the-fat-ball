@@ -117,6 +117,18 @@ def test_setup_stores_ip_password_and_pin_hash(setup_cli, capsys):
     assert "hunter2" not in out and "1234" not in out
 
 
+def test_setup_with_a_new_camera_ip_forgets_the_remembered_mac(setup_cli, tmp_path):
+    (tmp_path / "data").mkdir()
+    seed = connect(Settings(data_dir=tmp_path / "data").db_path)
+    repo.upsert_camera(seed, "feeder", "aa:bb:cc:dd:ee:ff", "192.168.1.40")
+    seed.close()
+
+    _, _, conn = setup_cli(typed=["192.168.1.41"], secret=["", ""], stored="old")
+
+    camera = repo.get_camera(conn)
+    assert (camera.last_ip, camera.mac) == ("192.168.1.41", None)
+
+
 def test_setup_fills_the_species_catalog(setup_cli):
     _, _, conn = setup_cli(typed=[""], secret=["", ""], stored="old")
     assert conn.execute("SELECT COUNT(*) FROM species").fetchone()[0] == 48

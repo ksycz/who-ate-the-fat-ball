@@ -45,6 +45,7 @@ def _watcher(tmp_path, conn, cam, clock, *, ip="127.0.0.1", **kw):
     settings = Settings(data_dir=tmp_path, camera_port=cam.port)
     kw.setdefault("find", lambda subnet, port, mac: None)
     kw.setdefault("sleep", lambda s: None)
+    kw.setdefault("mac_of", lambda ip: None)  # the fake camera has no MAC address
     return Watcher(settings, conn, now=clock, password=lambda: "",
                    client_timeout=2.0, silence_s=1.0, probe_timeout=0.2, **kw)
 
@@ -379,7 +380,7 @@ def test_arp_table_finds_camera_at_a_new_ip_without_scanning(tmp_path, conn, cam
     calls, find = _scan_log()
     looked_up = []
     w = _watcher(tmp_path, conn, cam, Clock(NOW), ip="10.255.255.1", find=find,
-                 arp_lookup=lambda mac: looked_up.append(mac) or "127.0.0.1")
+                 arp_lookup=lambda mac: looked_up.append(mac) or "127.0.0.1", mac_of=lambda ip: "aa:bb:cc:dd:ee:ff")
     camera_id = repo.upsert_camera(conn, "feeder", "aa:bb:cc:dd:ee:ff", None)
     repo.update_camera_status(conn, camera_id, last_seen_at=NOW - timedelta(minutes=5))
 
@@ -437,3 +438,54 @@ def test_first_run_without_an_ip_scans_the_local_subnet_with_back_off(tmp_path, 
         clock.t = NOW + timedelta(minutes=minute)
         assert w.tick().reachable is False
     assert calls == ["192.168.1.5"]
+
+
+CAMERA_MAC = "aa:bb:cc:dd:ee:ff"
+OTHER_MAC = "11:22:33:44:55:66"
+
+
+def test_first_good_login_remembers_the_cameras_mac(tmp_path, conn, cam):
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), mac_of=lambda ip: CAMERA_MAC)
+
+    assert w.tick().error is None
+    assert repo.get_camera(conn).mac == CAMERA_MAC
+
+
+def test_no_mac_in_the_arp_table_leaves_the_camera_unpinned(tmp_path, conn, cam):
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), mac_of=lambda ip: None)
+
+    assert w.tick().error is None
+    assert repo.get_camera(conn).mac is None
+
+
+def test_another_device_at_the_cameras_ip_never_gets_the_login(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), mac_of=lambda ip: OTHER_MAC, arp_lookup=lambda mac: None)
+    camera_id = repo.upsert_camera(conn, "feeder", CAMERA_MAC, None)
+    repo.update_camera_status(conn, camera_id, last_seen_at=NOW - timedelta(minutes=5))
+
+    assert w.tick() == TickResult(reachable=False, downloaded=0, error="other_device")
+    assert cam.login_attempts == 0
+    camera = repo.get_camera(conn)
+    assert camera.last_error == "other_device"
+    assert camera.last_seen_at == (NOW - timedelta(minutes=5)).astimezone()
+
+
+def test_camera_is_found_by_its_mac_when_another_device_took_its_old_ip(tmp_path, conn, cam):
+    cam.add_file(_file(NOW.replace(hour=9)))
+    macs = {"localhost": OTHER_MAC, "127.0.0.1": CAMERA_MAC}
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), ip="localhost", mac_of=macs.get,
+                 arp_lookup=lambda mac: "127.0.0.1" if mac == CAMERA_MAC else None)
+    repo.upsert_camera(conn, "feeder", CAMERA_MAC, None)
+
+    assert w.tick() == TickResult(reachable=True, downloaded=1, error=None)
+    assert repo.get_camera(conn).last_ip == "127.0.0.1"
+
+
+def test_a_scan_hit_with_another_mac_gets_no_login(tmp_path, conn, cam):
+    w = _watcher(tmp_path, conn, cam, Clock(NOW), ip=None, find=lambda subnet, port, mac: "127.0.0.1",
+                 mac_of=lambda ip: OTHER_MAC, arp_lookup=lambda mac: None)
+    repo.upsert_camera(conn, "feeder", CAMERA_MAC, None)
+
+    assert w.tick().reachable is False
+    assert cam.login_attempts == 0

@@ -26,6 +26,8 @@
     account_locked: "The camera locked the login after wrong passwords. The app tries again in 10 minutes.",
     no_password: "The camera has no password. Set one in Setup.",
     low_disk: "The Mac is nearly out of space.",
+    other_device:
+      "A different device answered at the camera's address, so the app didn't send it the camera login. If you replaced the camera, enter its IP address again in Setup.",
   };
   const errorText = (code: string) => ERRORS[code] ?? `Something went wrong (${code}). The app keeps trying.`;
 

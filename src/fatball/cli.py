@@ -271,7 +271,7 @@ def run_setup(
             except ValueError:
                 print("That is not an IP address (for example 192.168.1.40). Try again.")
                 continue
-            repo.upsert_camera(conn, CAMERA_NAME, None, ip)
+            repo.set_camera_ip(conn, CAMERA_NAME, ip)
             print("Camera IP saved.")
             break
 

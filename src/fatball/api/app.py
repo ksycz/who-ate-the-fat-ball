@@ -37,7 +37,14 @@ RECENT = timedelta(hours=1)
 # Watcher errors the owner has to fix: these turn the dot orange even if the camera was seen just now.
 # Everything else (an interrupted download, a clock that could not be set...) is reported in last_error
 # but leaves the dot to follow last_seen_at.
-ACTIONABLE_ERRORS = frozenset({"wrong_password", "account_locked", "no_password", "low_disk", "internal_error"})
+ACTIONABLE_ERRORS = frozenset(
+    {"wrong_password", "account_locked", "no_password", "low_disk", "internal_error", "other_device"}
+)
+SECURITY_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+}
 _KIND_NAMES = {"h264": "video", "jpg": "photo"}
 Pin = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}$")]
 
@@ -164,6 +171,14 @@ def create_app(
     shared across FastAPI's thread pool); the database is created up front so requests never race to."""
     db.connect(settings.db_path).close()
     app = FastAPI(title="Who Ate the Fat Ball?")
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """No other site may frame the app: on the Mac every request may edit, so a framed gallery could
+        be clicked through by a hostile page (clickjacking)."""
+        response = await call_next(request)
+        response.headers.update(SECURITY_HEADERS)
+        return response
     auth = Auth(lambda: db.connect(settings.db_path), lambda: now().astimezone())
     app.state.auth = auth
 
@@ -442,7 +457,7 @@ def create_app(
         if not auth_mod.is_local(request):
             raise HTTPException(status_code=403, detail="setup only works from the Mac itself")
         if body.ip is not None:
-            repo.upsert_camera(conn, CAMERA_NAME, None, body.ip)
+            repo.set_camera_ip(conn, CAMERA_NAME, body.ip)
         if body.password is not None:
             camera_secrets.set_password(body.password)
         if body.edit_pin is not None:

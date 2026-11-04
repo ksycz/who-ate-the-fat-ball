@@ -131,3 +131,17 @@ def test_unknown_post_is_json_404(settings, tmp_path):
 
 def test_wrong_method_on_a_real_route_stays_405(settings, tmp_path):
     assert _client(settings, tmp_path / "static").post("/api/status").status_code == 405
+
+
+def test_no_other_site_may_frame_the_app(settings, tmp_path):
+    """On the Mac every request may edit, so a page framing the gallery could trick a click (clickjacking)."""
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<html>gallery</html>")
+    (static / "assets" / "app.js").write_text("console.log(1)")
+    c = _client(settings, static)
+    for path in ("/", "/birds", "/assets/app.js", "/api/status", "/api/nope", "/media/nope.mp4"):
+        r = c.get(path)
+        assert r.headers["x-frame-options"] == "DENY", path
+        assert r.headers["content-security-policy"] == "frame-ancestors 'none'", path
+        assert r.headers["x-content-type-options"] == "nosniff", path

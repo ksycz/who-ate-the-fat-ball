@@ -62,6 +62,7 @@ class Watcher:
         sleep: Callable[[float], None] = time.sleep,
         find: Callable[[str, int, str | None], str | None] = discovery.find_camera,
         arp_lookup: Callable[[str], str | None] = discovery.arp_lookup,
+        mac_of: Callable[[str], str | None] = discovery.mac_of,
         password: Callable[[], str | None] = secrets.get_password,
         client_timeout: float = 8.0,
         silence_s: float = 6.0,
@@ -69,7 +70,9 @@ class Watcher:
     ) -> None:
         self.settings, self.conn = settings, conn
         self._connect, self._now, self._sleep, self._find, self._password = connect, now, sleep, find, password
-        self._arp_lookup = arp_lookup
+        self._arp_lookup, self._mac_of = arp_lookup, mac_of
+        self._other_device = False  # this tick, a device that is not the camera answered on its port
+        self._warned_other: str | None = None  # last IP logged as "not the camera", so it is logged once
         self._client_timeout, self._silence_s = client_timeout, silence_s
         self._probe_timeout = probe_timeout
         self._covered_through: date | None = None  # files up to the start of this day are known
@@ -145,6 +148,9 @@ class Watcher:
 
         host = self._locate(camera, now)
         if host is None:
+            if self._other_device:
+                repo.update_camera_status(self.conn, camera_id, last_error="other_device")
+                return TickResult(False, 0, "other_device")
             return TickResult(False, 0, None)
         repo.update_camera_status(self.conn, camera_id, last_seen_at=now, last_ip=host)
 
@@ -154,6 +160,8 @@ class Watcher:
             with self._connect(host, self.settings.camera_port, self._client_timeout,
                                silence_s=self._silence_s) as client:
                 client.login(CAMERA_USER, password)
+                if camera.mac is None:
+                    self._remember_mac(host)
                 if camera.last_error is not None:  # the login worked: don't show an old error while downloading
                     repo.update_camera_status(self.conn, camera_id, clear_error=True)
                 clock_ok = self._fix_clock(client, camera_id, now)
@@ -201,11 +209,14 @@ class Watcher:
         exponential back-off between failed scans.
         """
         port = self.settings.camera_port
-        if camera.last_ip and discovery.is_open(camera.last_ip, port, self._probe_timeout):
+        self._other_device = False
+        if camera.last_ip and discovery.is_open(camera.last_ip, port, self._probe_timeout) \
+                and self._is_camera(camera, camera.last_ip):
             return self._located(camera.last_ip)
         if camera.mac:
             ip = self._arp_lookup(camera.mac)
-            if ip and ip != camera.last_ip and discovery.is_open(ip, port, self._probe_timeout):
+            if ip and ip != camera.last_ip and discovery.is_open(ip, port, self._probe_timeout) \
+                    and self._is_camera(camera, ip):
                 log.info("camera found at %s via the ARP table", ip)
                 return self._located(ip)
         if camera.last_ip and self._seen_recently(camera, now):
@@ -216,7 +227,8 @@ class Watcher:
         if subnet is None:
             return None
         found = self._find(subnet, port, camera.mac)
-        if found is not None and discovery.is_open(found, port, self._probe_timeout):
+        if found is not None and discovery.is_open(found, port, self._probe_timeout) \
+                and self._is_camera(camera, found):
             log.info("camera rediscovered at %s", found)
             return self._located(found)
         self._scan_backoff = (SCAN_BACKOFF_FIRST if self._scan_backoff is None
@@ -227,7 +239,28 @@ class Watcher:
 
     def _located(self, host: str) -> str:
         self._scan_backoff = self._next_scan_at = None
+        self._warned_other = None
         return host
+
+    def _is_camera(self, camera: repo.Camera, ip: str) -> bool:
+        """Whether the device at `ip` may get the login (which carries the password hash).
+
+        Once the camera's MAC is known, only a device with that MAC qualifies. Before that (first run, or
+        after Setup was given a new camera IP) any device does, and the first good login remembers its MAC.
+        """
+        if camera.mac is None or discovery.same_mac(self._mac_of(ip), camera.mac):
+            return True
+        self._other_device = True
+        if self._warned_other != ip:
+            log.warning("a device that is not the camera answered at %s; not logging in", ip)
+            self._warned_other = ip
+        return False
+
+    def _remember_mac(self, host: str) -> None:
+        mac = self._mac_of(host)
+        if mac is not None:
+            repo.upsert_camera(self.conn, CAMERA_NAME, mac, None)
+            log.info("remembered the camera's MAC address; only that device gets the login from now on")
 
     @staticmethod
     def _seen_recently(camera: repo.Camera, now: datetime) -> bool:
