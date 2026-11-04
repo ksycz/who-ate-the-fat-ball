@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { get } from "svelte/store";
 import SelectBar from "../src/components/SelectBar.svelte";
 import VisitCard from "../src/components/VisitCard.svelte";
-import { movedText, moveVisits, selection } from "../src/lib/select";
+import { deleteEmptyClips, movedText, moveVisits, selection } from "../src/lib/select";
 import { canEdit, changes, toast } from "../src/lib/session";
 import { navigate } from "../src/lib/router";
 import type { Visit } from "../src/lib/api";
@@ -79,11 +79,29 @@ describe("moveVisits", () => {
     expect(get(selection).on).toBe(false);
   });
 
-  it("offers no Undo when nothing changed", async () => {
+  it("says where they already are, with no Undo, when nothing changed", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ undo_token: null, changed: 0 }), { status: 200 })));
     await moveVisits([1], "other");
     expect(get(toast)?.undoToken).toBeUndefined();
-    expect(get(toast)?.text).toBe("Nothing changed");
+    expect(get(toast)?.text).toBe("Already in Other");
+    await moveVisits([1], "birds");
+    expect(get(toast)?.text).toBe("Already in Birds");
+    await moveVisits([1], "other_animals");
+    expect(get(toast)?.text).toBe("Already in Other animals");
+  });
+
+  it("refuses more than 500 at once without asking the Mac", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    selection.enter();
+    selection.toggle(1);
+    const ids = Array.from({ length: 501 }, (_, i) => i + 1);
+    await moveVisits(ids, "other");
+    expect(get(toast)?.text).toBe("You can move up to 500 visits at once");
+    expect(await deleteEmptyClips(ids)).toBe(false);
+    expect(get(toast)?.text).toBe("You can delete up to 500 visits at once");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(selection).ids.size).toBe(1); // the picks stay
   });
 
   it("says editing is locked on 403 and keeps the selection", async () => {

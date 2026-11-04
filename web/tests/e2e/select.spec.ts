@@ -58,3 +58,20 @@ test("Download .zip on one selected visit downloads fat-ball-1-visits.zip", asyn
   ]);
   expect(download.suggestedFilename()).toBe("fat-ball-1-visits.zip");
 });
+
+test("on a phone the toast rests above the Select bar, not on it", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/birds");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("checkbox", { name: /^Select / }).first().check();
+  await page.getByRole("button", { name: "Download .zip" }).click();
+  await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("dialog").getByRole("button", { name: "Download", exact: true }).click(),
+  ]);
+  const toast = page.getByRole("status").filter({ hasText: /^Downloading 1 visit/ });
+  await expect(toast).toBeVisible();
+  const bar = await page.getByRole("region", { name: "Selected visits" }).boundingBox();
+  const box = await toast.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(bar!.y);
+});

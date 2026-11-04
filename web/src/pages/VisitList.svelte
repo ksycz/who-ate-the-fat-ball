@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { ApiError, getJSON, type Category, type Today, type Visit } from "../lib/api";
   import { dayHeading, dayOf, speciesLabel, visitName } from "../lib/format";
-  import { deleteEmptyClips, moveVisits, selection } from "../lib/select";
+  import { deleteEmptyClips, moveVisits, overLimit, selection } from "../lib/select";
   import { changes, noteServerDay, serverDay, showToast } from "../lib/session";
   import { askZip, type ZipPlan, type ZipRequest } from "../lib/zip";
   import { recallSpeciesName, loadList, loadOtherFilter, saveList, saveOtherFilter } from "../lib/listCache";
@@ -49,6 +49,7 @@
   let failed = $state(false);
   let newSpecies = $state<Today["new_species"]>(null);
   let sentinel = $state<HTMLElement | null>(null);
+  let heading = $state<HTMLElement | null>(null);
   let filter = $state<Filter>("all"); // only used on Other
   let confirmingDelete = $state(false);
   let zipPlan = $state<ZipPlan | null>(null);
@@ -142,9 +143,13 @@
   async function deleteSelected() {
     if (working || picked.length === 0) return;
     working = true;
-    await deleteEmptyClips(picked); // on a failure the picks stay
+    const deleted = await deleteEmptyClips(picked); // on a failure the picks stay
     confirmingDelete = false;
     working = false;
+    if (deleted) {
+      await tick();
+      heading?.focus(); // the Delete button that opened the dialog has gone with the selection
+    }
   }
 
   // Ask the Mac how big the .zip is; the owner then confirms before anything downloads.
@@ -229,7 +234,7 @@
     </button>
   {/if}
   <div class="head">
-    <h1>{title}</h1>
+    <h1 tabindex="-1" bind:this={heading}>{title}</h1>
     {#if loaded && visits.length > 0}
       <div class="tools">
         {#if $selection.on}
@@ -260,8 +265,8 @@
       count={picked.length}
       busy={working}
       onmove={moveSelected}
-      onzip={() => planZip({ visit_ids: picked })}
-      ondelete={() => (confirmingDelete = true)}
+      onzip={() => overLimit(picked.length, "download") || planZip({ visit_ids: picked })}
+      ondelete={() => overLimit(picked.length, "delete") || (confirmingDelete = true)}
     />
   {/if}
 
@@ -278,7 +283,8 @@
     <section>
       <div class="day">
         <h2>{dayHeading(group.day, $serverDay ?? "")}</h2>
-        {#if species === null}
+        <!-- A species list, or Other narrowed by a filter, shows only part of the day: no whole-day zip. -->
+        {#if species === null && !(kind === "other" && filter !== "all")}
           <button type="button" class="day-zip" disabled={working} onclick={() => zipDay(group.day)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Download this day (.zip)
           </button>

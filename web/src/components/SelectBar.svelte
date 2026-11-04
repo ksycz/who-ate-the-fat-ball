@@ -29,13 +29,26 @@
   // Only empty clips can be deleted, and only by an editor.
   const canDelete = $derived($canEdit && kind === "other" && filter === "empty" && !!ondelete);
   let moveOpen = $state(false);
+  // On the phone the bar is fixed above the nav: --select-bar-h tells the toast how far to rise above it.
+  let bar = $state<HTMLElement | null>(null);
+  $effect(() => {
+    const root = document.documentElement.style;
+    if (!bar || $wide || typeof ResizeObserver === "undefined") return;
+    const el = bar;
+    const observer = new ResizeObserver(() => root.setProperty("--select-bar-h", `${el.offsetHeight}px`));
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.removeProperty("--select-bar-h");
+    };
+  });
   $effect(() => {
     void $wide;
     moveOpen = false; // the reveal only exists on the phone layout
   });
 </script>
 
-<div class="bar" role="region" aria-label="Selected visits">
+<div class="bar" role="region" aria-label="Selected visits" bind:this={bar}>
   <span class="count">{plural(count, "visit")} selected</span>
   {#if $canEdit && !$wide && moveOpen}
     <div class="targets" role="group" aria-label="Move to">

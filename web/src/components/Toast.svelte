@@ -46,7 +46,7 @@
 
 <style>
   .toast {
-    position: fixed; z-index: 20; left: 16px; right: 16px; bottom: calc(var(--nav-phone-h) + 20px); box-sizing: border-box;
+    position: fixed; z-index: 20; left: 16px; right: 16px; bottom: calc(var(--nav-phone-h) + 20px + var(--select-bar-h, 0px)); box-sizing: border-box;
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     border-radius: 14px; padding: 6px 6px 6px 16px; background: var(--ink); color: #fff;
     font-size: 14px; box-shadow: 0 6px 18px rgba(40, 30, 20, 0.25);

@@ -115,6 +115,7 @@ describe("Other page", () => {
     await fireEvent.click(screen.getByRole("dialog").querySelector(".go") as HTMLElement);
     await waitFor(() => expect(get(toast)?.text).toBe("2 empty clips deleted"));
     expect(get(changes)).toBeGreaterThan(before);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1 })));
     const call = fetchMock.mock.calls.find((c) => c[0] === "/api/visits/delete")!;
     expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({ visit_ids: [2, 1] });
   });
