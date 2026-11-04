@@ -20,6 +20,7 @@ function stats(over: Record<string, unknown> = {}) {
       { scientific: "Cyanistes caeruleus", name: "blue tit", visits: 84 },
       { scientific: "Sitta europaea", name: "Eurasian nuthatch", visits: 1 },
     ],
+    unknown_visits: 0,
     ...over,
   };
 }
@@ -71,6 +72,21 @@ describe("Stats page", () => {
     expect(screen.getByRole("status").textContent).toBe("Tap a square to see the number of visits");
     expect(screen.getByText("Great tit")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /visits?$/ })).toHaveLength(49);
+  });
+
+  it("adds an Unknown bird bar, in order, when there are unknown birds", async () => {
+    serve(stats({ unknown_visits: 5 }));
+    render(Stats);
+    await screen.findByText("Unknown bird");
+    const labels = [...document.querySelectorAll(".bar-line span:first-child")].map((e) => e.textContent);
+    expect(labels).toEqual(["Great tit", "Blue tit", "Unknown bird", "Eurasian nuthatch"]);
+  });
+
+  it("has no Unknown bird bar without unknown birds", async () => {
+    serve(stats());
+    render(Stats);
+    await screen.findByText("Great tit");
+    expect(screen.queryByText("Unknown bird")).toBeNull();
   });
 
   it("shows a dash when nothing is busiest", async () => {

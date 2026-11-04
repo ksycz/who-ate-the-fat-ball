@@ -82,6 +82,8 @@ def test_stats_birds_only_and_window(conn, cam):
     assert (s["visits"], s["species"]) == (3, 2)
     assert {p["scientific"] for p in s["per_species"]} == {GREAT, BLUE}
     assert all(p["visits"] == 1 for p in s["per_species"])
+    assert s["unknown_visits"] == 1  # so the bars add up to the Visits tile
+    assert sum(p["visits"] for p in s["per_species"]) + s["unknown_visits"] == s["visits"]
 
 
 def test_species_week_is_rolling_7_days(conn, cam):

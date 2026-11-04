@@ -57,7 +57,7 @@ def species_for_period(conn: sqlite3.Connection, today: date, period: Literal["w
 
 def summary(conn: sqlite3.Connection, today: date, weeks: int) -> dict:
     """Bird visits over the last `weeks` weeks: totals, the busiest-times heatmap (Mon..Sun rows by time slot)
-    and the visits per species."""
+    and the visits per species, plus `unknown_visits` for the Unknown birds, so the bars add up to `visits`."""
     since, until = _since(today, weeks * 7), today.isoformat()
     window = f"v.category = 'birds' AND {_LOCAL_DAY} BETWEEN ? AND ?"
     totals = conn.execute(
@@ -87,6 +87,7 @@ def summary(conn: sqlite3.Connection, today: date, weeks: int) -> dict:
         "per_species": [
             {"scientific": r["scientific_name"], "name": r["name"], "visits": r["visits"]} for r in per_species
         ],
+        "unknown_visits": totals["visits"] - sum(r["visits"] for r in per_species),
     }
 
 

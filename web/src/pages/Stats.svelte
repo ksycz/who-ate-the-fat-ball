@@ -17,7 +17,14 @@
   }
   onMount(load);
 
-  const top = $derived(Math.max(1, ...(data?.per_species.map((s) => s.visits) ?? [])));
+  // One bar per species, and one for the Unknown birds, so the bars add up to the Visits tile.
+  const bars = $derived.by(() => {
+    if (!data) return [];
+    const out = data.per_species.map((s) => ({ key: s.scientific, label: speciesLabel(s), visits: s.visits }));
+    if (data.unknown_visits > 0) out.push({ key: "unknown", label: "Unknown bird", visits: data.unknown_visits });
+    return out.sort((a, b) => b.visits - a.visits); // stable: ties keep the Mac's order
+  });
+  const top = $derived(Math.max(1, ...bars.map((b) => b.visits)));
 </script>
 
 <header>
@@ -45,10 +52,10 @@
     </section>
     <section aria-labelledby="per-h">
       <h2 id="per-h">Visits per bird</h2>
-      {#each data.per_species as s (s.scientific)}
+      {#each bars as b (b.key)}
         <div class="bar">
-          <div class="bar-line"><span>{speciesLabel(s)}</span><span class="n">{s.visits}</span></div>
-          <div class="track"><div class="fill" style="width: {Math.max(2, Math.round((s.visits / top) * 100))}%"></div></div>
+          <div class="bar-line"><span>{b.label}</span><span class="n">{b.visits}</span></div>
+          <div class="track"><div class="fill" style="width: {Math.max(2, Math.round((b.visits / top) * 100))}%"></div></div>
         </div>
       {/each}
     </section>
@@ -72,7 +79,7 @@
   .track { height: 10px; border-radius: 5px; background: var(--sand); }
   .fill { height: 10px; border-radius: 5px; background: var(--robin); }
   .empty { color: var(--ink-2); }
-  .again { min-height: 44px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--robin-tint); font-weight: 600; font: inherit; color: var(--robin-dark); cursor: pointer; }
+  .again { min-height: 44px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--robin-tint); font: inherit; font-weight: 600; color: var(--robin-dark); cursor: pointer; }
   @media (min-width: 900px) {
     .panels { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
   }

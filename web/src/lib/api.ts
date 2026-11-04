@@ -147,4 +147,5 @@ export interface StatsSummary {
   slots: string[];
   heatmap: { day: string; cells: number[] }[];
   per_species: { scientific: string; name: string | null; visits: number }[];
+  unknown_visits: number; // Unknown birds: in `visits`, not in any species bar
 }
