@@ -339,13 +339,15 @@ def example_count(conn: sqlite3.Connection) -> int:
 
 def set_recognition(
     conn: sqlite3.Connection, clip_id: int, *, best_frame_path: str | None, verdict_json: str, recognized_at: datetime
-) -> None:
-    conn.execute(
+) -> bool:
+    """Store the recognition result; False (nothing stored) when the clip has been deleted meanwhile."""
+    cur = conn.execute(
         "UPDATE clip SET best_frame_path = ?, verdict_json = ?, recognized_at = ?, recognition_error = NULL, "
-        "recognition_wanted = 0 WHERE id = ?",
+        "recognition_wanted = 0 WHERE id = ? AND deleted_at IS NULL",
         (best_frame_path, verdict_json, iso(recognized_at), clip_id),
     )
     conn.commit()
+    return cur.rowcount > 0
 
 
 def get_clip(conn: sqlite3.Connection, clip_id: int) -> Clip | None:

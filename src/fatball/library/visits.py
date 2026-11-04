@@ -40,13 +40,17 @@ class _Member:
         return self.subject == "species"
 
 
-def assign_visit(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -> int:
-    """Put the clip into the right visit (creating, joining or merging) and return that visit's id.
+def assign_visit(conn: sqlite3.Connection, clip: Clip, verdict: Verdict) -> int | None:
+    """Put the clip into the right visit (creating, joining or merging) and return that visit's id, or None
+    (and nothing changes) when the clip has been deleted meanwhile.
 
     A clip the owner's visit already holds (moved_by_user) stays there: re-recognising it only recomputes
     that visit's derived fields, so the pipeline never empties or splits an owner-moved visit."""
     with conn:
         begin_immediate(conn)
+        deleted = conn.execute("SELECT deleted_at FROM clip WHERE id = ?", (clip.id,)).fetchone()
+        if deleted is not None and deleted["deleted_at"] is not None:
+            return None
         current = conn.execute(
             "SELECT v.id, v.moved_by_user FROM visit_clip vc JOIN visit v ON v.id = vc.visit_id WHERE vc.clip_id = ?",
             (clip.id,),

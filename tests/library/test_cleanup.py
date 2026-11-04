@@ -170,3 +170,44 @@ def test_bulk_undo_token_is_removed_with_its_visit(conn, cam, media):
     assert count(conn, "SELECT COUNT(*) FROM undo") == 0  # token's visit_id was a
     with pytest.raises(corrections.UnknownToken):
         corrections.undo(conn, token)
+
+
+def test_delete_during_recognition_brings_nothing_back(tmp_path, monkeypatch):
+    """R18: the clip is deleted while its recognition runs (after the frames are taken, before write-back)."""
+    import numpy as np
+
+    from fatball.config import Settings
+    from fatball.ingest.processor import recognize_and_group
+    from fatball.recognition import recognizer as recognizer_mod
+    from fatball.recognition.detector import Detection
+    from fatball.recognition.fake import FakeDetector
+
+    settings = Settings(data_dir=tmp_path / "data")
+    media = settings.media_dir
+    media.mkdir(parents=True)
+    c = connect(settings.db_path)
+    repo.ensure_catalog(c)
+    cam = repo.upsert_camera(c, "feeder", None, None)
+    clip_id, v = add_visit(c, cam, media, 0, empty())
+    repo.set_clip_status(c, clip_id, "ready", web_path=f"clips/{clip_id}/web.mp4")
+    (media / "clips" / str(clip_id)).mkdir(parents=True)
+    (media / "clips" / str(clip_id) / "web.mp4").write_bytes(b"x")
+    stale = repo.get_clip(c, clip_id)  # what the processor holds while it works
+
+    def frames_then_delete(video, out_dir, **kw):
+        frame = out_dir / "frame_0001.jpg"
+        frame.write_bytes(b"jpg")
+        cleanup.delete_empty_visits(c, media, [v], T0)  # the owner deletes it now
+        return [frame]
+
+    monkeypatch.setattr(recognizer_mod, "extract_frames", frames_then_delete)
+    detector = FakeDetector({0: [Detection("animal", 0.9, (0.2, 0.2, 0.6, 0.6))]})
+    rec = recognizer_mod.Recognizer(settings, c, detector, lambda path, box: np.ones(2, np.float32))
+    assert recognize_and_group(c, rec, stale) is None
+
+    assert count(c, "SELECT COUNT(*) FROM visit") == 0
+    assert count(c, "SELECT COUNT(*) FROM visit_clip") == 0
+    row = c.execute("SELECT best_frame_path, verdict_json, deleted_at FROM clip WHERE id = ?", (clip_id,)).fetchone()
+    assert row["deleted_at"] is not None and row["best_frame_path"] is None
+    assert not (media / "clips" / str(clip_id) / "best.jpg").exists()
+    c.close()
