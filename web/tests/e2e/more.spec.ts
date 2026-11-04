@@ -45,3 +45,15 @@ test("Unlock editing → a correct PIN returns to More", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "More" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Unlock editing" })).toHaveCount(0);
 });
+
+test("Unlock editing → a wrong PIN says so and stays on Unlock", async ({ page }) => {
+  // The real PIN check (hashing, lockout) is covered by the API tests; here only the page's reaction to a 401.
+  await page.route("**/api/me", (route) => route.fulfill({ json: { can_edit: false } }));
+  await page.route("**/api/unlock", (route) => route.fulfill({ status: 401, json: { detail: "wrong_pin" } }));
+  await page.goto("/more");
+  await page.getByRole("link", { name: "Unlock editing" }).click();
+  await page.getByLabel("Edit PIN").fill("0000");
+  await page.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("That PIN isn't right");
+  await expect(page).toHaveURL(/\/unlock$/);
+});

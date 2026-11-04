@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { expect, firstVisitId, reseed, test } from "./helpers";
 
 // Screenshots of the main screens over the synthetic e2e seed (generated test-pattern clips, never real
@@ -22,11 +22,12 @@ async function settled(page: Page) {
   });
 }
 
-// The <video> shows a moving test pattern, the camera line counts minutes and App status shows this Mac's free disk space: hide all three.
-const masks = (page: Page): Locator[] => [page.locator("video"), page.getByText(/Camera seen|Camera not seen|min ago|GB free/)];
+// The <video> shows a moving test pattern (hidden with CSS in shot(), not masked, so the overlays on it stay in the picture), the camera line counts minutes and App status shows this Mac's free disk space: mask those two texts.
+const masks = (page: Page): Locator[] => [page.getByText(/Camera seen|Camera not seen|min ago|GB free/)];
 
 async function shot(page: Page, name: string) {
   await settled(page);
+  await page.addStyleTag({ content: "video { visibility: hidden !important; }" });
   await expect(page).toHaveScreenshot(name, {
     animations: "disabled",
     mask: masks(page),
@@ -36,7 +37,7 @@ async function shot(page: Page, name: string) {
 
 const GREAT_TIT = "category=birds&species=Parus%20major";
 
-const screens: [string, (page: Page, request: import("@playwright/test").APIRequestContext) => Promise<void>][] = [
+const screens: [string, (page: Page, request: APIRequestContext) => Promise<void>][] = [
   ["today", async (page) => {
     await page.goto("/");
     await expect(page.getByText("Checking who it is…")).toBeVisible();
