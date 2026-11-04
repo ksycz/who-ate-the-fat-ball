@@ -3,6 +3,7 @@
   import { getJSON, send, type Visit } from "../lib/api";
   import { dayOf, speciesLabel, sureChip, visitName, visitTime } from "../lib/format";
   import { canEdit, changes, noteChanged, serverDay, showSaveFailure, showToast } from "../lib/session";
+  import { wide } from "../lib/media";
   import FilterChips from "../components/FilterChips.svelte";
   import Picker from "../components/Picker.svelte";
 
@@ -198,21 +199,21 @@
 <div class="page">
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <section class="feed" aria-label="Videos feed" onpointerdown={onDown} onpointerup={onUp} onpointercancel={() => (start = null)}>
+    <header>
+      <div class="title-row">
+        <h1>Videos</h1>
+        <span class="position" aria-live="polite">{#if item}{index + 1} of {total}{/if}</span>
+      </div>
+      {#if filters.length > 0}
+        <FilterChips tone={$wide ? "light" : "dark"} options={chipLabels} value={chipValue} onchange={chooseChip} />
+      {/if}
+    </header>
+
     <div class="stage">
       {#if item}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video src={item.video_url} poster={item.poster_url ?? item.best_frame_url ?? undefined} playsinline muted autoplay controls preload="metadata"></video>
       {/if}
-
-      <header>
-        <div class="title-row">
-          <h1>Videos</h1>
-          <span class="position" aria-live="polite">{#if item}{index + 1} of {total}{/if}</span>
-        </div>
-        {#if filters.length > 0}
-          <FilterChips tone="dark" options={chipLabels} value={chipValue} onchange={chooseChip} />
-        {/if}
-      </header>
 
       {#if failed}
         <div class="message">
@@ -279,13 +280,11 @@
     flex: 1; min-height: 0; display: flex; flex-direction: column; touch-action: none; user-select: none;
     background: #000; width: 100%; margin: 0 auto;
   }
-  /* The bar sits below the picture, so the player's own controls row stays clickable. */
+  /* The header sits above the picture and the bar below it, so neither hides the camera's own date or the
+     player's controls row. */
   .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-  header {
-    position: absolute; left: 0; right: 0; top: 0; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px;
-    background: rgba(46, 33, 22, 0.6);
-  }
+  header { flex: none; padding: 16px 16px 12px; display: flex; flex-direction: column; gap: 10px; background: var(--ink); }
   .title-row { display: flex; align-items: center; justify-content: space-between; }
   h1 { margin: 0; font-weight: 800; font-size: 22px; }
   .position { font-size: 13px; color: var(--sand); }
@@ -309,7 +308,7 @@
   .prev { border: 1px solid rgba(255, 255, 255, 0.45); background: transparent; }
   .next { border: none; background: var(--robin); }
   .buttons button:disabled { opacity: 0.4; cursor: default; }
-  .empty, .message { position: absolute; left: 0; right: 0; top: 120px; margin: 0; padding: 24px; text-align: center; font-size: 17px; font-weight: 600; }
+  .empty, .message { position: absolute; left: 0; right: 0; top: 40px; margin: 0; padding: 24px; text-align: center; font-size: 17px; font-weight: 600; }
   .message { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .message p { margin: 0; }
   .again {
@@ -317,7 +316,21 @@
     background: transparent; color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   @media (min-width: 768px) {
-    .page { height: calc(100vh - 68px); border-radius: 22px; overflow: hidden; }
-    .feed { max-width: 960px; }
+    /* On the Mac the page is light like the lists. The camera films 16:9, and the column is as wide as a 16:9
+       picture that still fits the window's height with the header and bar (about 300 px with the page
+       padding), so the video fills its frame with no dark strips. */
+    .page {
+      height: auto; min-height: 0; margin: 0 auto; background: transparent; color: var(--ink);
+      width: min(100%, 960px, calc((100vh - 300px) * 16 / 9));
+    }
+    .feed { background: transparent; }
+    header { padding: 0 0 14px; background: transparent; }
+    .position { color: var(--ink-2); }
+    .stage { flex: none; aspect-ratio: 16 / 9; border-radius: 14px; background: #000; color: #fff; }
+    .bar { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0 0; background: transparent; }
+    .name { font-size: 22px; }
+    .when { color: var(--ink-2); }
+    .buttons button { flex: none; min-height: 44px; padding: 0 22px; }
+    .buttons .prev { border-color: var(--line-strong); color: var(--ink); background: #fff; }
   }
 </style>
