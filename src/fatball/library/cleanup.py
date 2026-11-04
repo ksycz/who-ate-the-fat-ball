@@ -1,11 +1,14 @@
 """Deleting empty clips: the files go, the clip rows stay as tombstones so the camera's copy is never fetched again."""
 
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 
 from fatball.library.db import begin_immediate
 from fatball.library.repo import iso
+
+log = logging.getLogger("fatball.cleanup")
 
 _CLIP_FILES = ("raw_path", "original_path", "web_path", "poster_path", "preview_path", "best_frame_path")
 
@@ -22,7 +25,8 @@ def delete_empty_visits(conn: sqlite3.Connection, media_dir: Path, visit_ids: li
     """Delete empty-clip visits and their media; returns how many. Raises VisitNotFound / NotEmpty (nothing
     changes). The clip rows stay with `deleted_at` set and their paths cleared; detections are kept.
 
-    Files are removed after the database commit, so a failure never leaves a visit pointing at missing files."""
+    Files are removed after the database commit, so a failure never leaves a visit pointing at missing files.
+    A file that cannot be removed then is logged and left; the delete has happened."""
     ids = list(dict.fromkeys(visit_ids))
     files: list[Path] = []
     with conn:
@@ -52,6 +56,13 @@ def delete_empty_visits(conn: sqlite3.Connection, media_dir: Path, visit_ids: li
             for table in ("visit_clip", "guess", "undo", "correction"):
                 conn.execute(f"DELETE FROM {table} WHERE visit_id = ?", (visit_id,))
             conn.execute("DELETE FROM visit WHERE id = ?", (visit_id,))
+    media_root = media_dir.resolve()
     for path in files:
-        path.unlink(missing_ok=True)
+        try:
+            if not path.resolve().is_relative_to(media_root):
+                log.warning("not removing %s: outside the media folder", path)
+                continue
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("could not remove %s: %s", path, exc)
     return len(ids)

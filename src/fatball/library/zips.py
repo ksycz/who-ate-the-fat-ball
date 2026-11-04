@@ -1,5 +1,7 @@
 """Downloading visits as one .zip: a plan (names, sizes) made first, then a stream that never holds a file in memory."""
 
+import logging
+import os
 import sqlite3
 import time
 import zipfile
@@ -9,6 +11,8 @@ from datetime import date
 from pathlib import Path
 
 from fatball.library import repo
+
+log = logging.getLogger("fatball.zips")
 
 MAX_VISITS = 500
 CHUNK = 1024 * 1024
@@ -135,7 +139,13 @@ def stream_zip(plan: ZipPlan) -> Iterator[bytes]:
     sink = _Sink()
     with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED) as zf:  # type: ignore[arg-type]
         for name, path in plan.entries:
-            with path.open("rb") as src, zf.open(zipfile.ZipInfo(name, _mtime(path)), "w", force_zip64=True) as dst:
+            try:
+                src = path.open("rb")
+            except OSError as exc:  # gone since the plan (e.g. deleted): skip it, the rest still downloads
+                log.warning("left %s out of the zip: %s", name, exc)
+                continue
+            info = zipfile.ZipInfo(name, _mtime(os.fstat(src.fileno()).st_mtime))
+            with src, zf.open(info, "w", force_zip64=True) as dst:
                 while chunk := src.read(CHUNK):
                     dst.write(chunk)
                     if data := sink.drain():
@@ -146,6 +156,6 @@ def stream_zip(plan: ZipPlan) -> Iterator[bytes]:
         yield data
 
 
-def _mtime(path: Path) -> tuple[int, int, int, int, int, int]:
-    t = time.localtime(path.stat().st_mtime)
+def _mtime(mtime: float) -> tuple[int, int, int, int, int, int]:
+    t = time.localtime(mtime)
     return (max(t.tm_year, 1980), t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)

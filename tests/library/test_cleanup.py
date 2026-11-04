@@ -108,6 +108,24 @@ def test_delete_removes_files_and_visit_but_keeps_clip_row(conn, cam, media):
     assert all(row[f"{k}_path"] is None for k in KINDS) and row["best_frame_path"] is None
 
 
+def test_a_file_that_cannot_be_removed_is_logged_not_raised(conn, cam, media, monkeypatch, caplog):
+    _, v = add_visit(conn, cam, media, 0, empty())
+    stuck = media / "web" / "1.bin"
+    real_unlink = type(stuck).unlink
+
+    def unlink(self, missing_ok=False):
+        if self == stuck:
+            raise PermissionError("in use")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(type(stuck), "unlink", unlink)
+    with caplog.at_level("WARNING", logger="fatball.cleanup"):
+        assert cleanup.delete_empty_visits(conn, media, [v], T0) == 1
+    assert count(conn, "SELECT COUNT(*) FROM visit") == 0
+    assert stuck.exists() and not (media / "raw" / "1.bin").exists()  # the others still went
+    assert "in use" in caplog.text
+
+
 def test_deleted_clip_is_never_fetched_or_recognised_again(conn, cam, media):
     clip, v = add_visit(conn, cam, media, 0, empty())
     repo.requeue_recognition(conn, clip)  # would be picked up again if it were not deleted

@@ -120,6 +120,20 @@ def test_stream_zip_is_valid_and_chunked(conn, media, cam):
     assert all(i.compress_type == zipfile.ZIP_STORED for i in z.infolist())
 
 
+def test_stream_skips_a_file_gone_since_the_plan(conn, media, cam, caplog):
+    _, gone = add_visit(conn, media, cam, datetime(2026, 11, 2, 9, 0))
+    _, kept = add_visit(conn, media, cam, datetime(2026, 11, 2, 10, 0))
+    plan = zips.plan_zip(conn, media, visit_ids=[gone, kept])
+    first = plan.entries[0]
+    first[1].unlink()  # deleted (e.g. an empty clip) between planning and streaming
+    with caplog.at_level("WARNING", logger="fatball.zips"):
+        z = zipfile.ZipFile(BytesIO(b"".join(zips.stream_zip(plan))))
+    assert z.testzip() is None
+    assert first[0] not in z.namelist()
+    assert z.namelist() == [name for name, _ in plan.entries[1:]]
+    assert first[0] in caplog.text
+
+
 def test_day_zip_for_category(conn, media, cam):
     t = datetime(2026, 11, 2, 9, 0)
     add_visit(conn, media, cam, t)
