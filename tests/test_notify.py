@@ -103,6 +103,7 @@ def test_loop_survives_a_failing_send(conn):
 
 
 def test_send_banner_passes_text_as_arguments(monkeypatch):
+    monkeypatch.setattr(notify, "terminal_notifier", lambda: None)
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
     notify.send_banner("The title", "secret body text")
@@ -112,6 +113,43 @@ def test_send_banner_passes_text_as_arguments(monkeypatch):
     assert "secret body text" not in script and "The title" not in script
     assert "item 2 of argv" in script and "item 1 of argv" in script
     assert cmd[-2:] == ["The title", "secret body text"]
+
+
+TN = "/opt/homebrew/bin/terminal-notifier"
+
+
+def test_with_terminal_notifier_a_click_opens_the_gallery(monkeypatch):
+    monkeypatch.setattr(notify, "terminal_notifier", lambda: TN)
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
+    notify.send_banner("The title", "2 new visits: great tit", url="http://localhost:8080/")
+    [(cmd, kw)] = calls
+    assert cmd == [TN, "-title", "The title", "-message", "2 new visits: great tit",
+                   "-open", "http://localhost:8080/"]
+    assert kw["timeout"] == 10
+
+
+def test_a_failing_terminal_notifier_falls_back_to_osascript(monkeypatch):
+    monkeypatch.setattr(notify, "terminal_notifier", lambda: TN)
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd[0])
+        if cmd[0] == TN:
+            raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    notify.send_banner("t", "b", url="http://localhost:8080/")
+    assert calls == [TN, "osascript"]
+
+
+def test_terminal_notifier_is_found_in_homebrew_even_off_the_path(monkeypatch, tmp_path):
+    tool = tmp_path / "terminal-notifier"
+    tool.write_text("#!/bin/sh\n")
+    tool.chmod(0o755)
+    monkeypatch.setattr(notify.shutil, "which", lambda name: None)  # a LaunchAgent's PATH has no Homebrew
+    monkeypatch.setattr(notify, "TERMINAL_NOTIFIER_PLACES", (tmp_path / "missing", tool))
+    assert notify.terminal_notifier() == str(tool)
 
 
 def test_send_banner_never_raises(monkeypatch):

@@ -150,6 +150,8 @@ Only new clips are recognised by default; `/api/status` shows `recognition.old_w
 
 A Mac banner announces new bird visits (and new species) while `fatball serve` runs; `uv run fatball notifications off` silences it (`on` turns it back on, no argument shows the state).
 
+To make a click on the banner open the gallery, install terminal-notifier once with `brew install terminal-notifier`, then restart `fatball serve`. If macOS asks whether "terminal-notifier" may send notifications, click **Allow**. Without it, banners still appear, but a click opens Script Editor.
+
 ### Your library is backed up before an upgrade
 
 Before the app upgrades an existing library to a newer format, it saves a copy next to it, for example `library.sqlite.v1.bak` in `~/Library/Application Support/WhoAteTheFatBall/`. Upgrades can't be undone, so keep that file until you're happy with the new version. An existing backup is never overwritten.
