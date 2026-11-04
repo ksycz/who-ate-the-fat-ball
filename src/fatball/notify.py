@@ -1,11 +1,18 @@
-"""Mac banners for new bird visits: a background loop that groups settled visits and shows them via osascript."""
+"""Mac banners for new bird visits: a background loop that groups settled visits and shows them.
+
+With terminal-notifier installed (`brew install terminal-notifier`), clicking a banner opens the gallery.
+Without it, banners go through osascript, and macOS opens Script Editor on a click.
+"""
 
 import logging
+import os
+import shutil
 import subprocess
 import threading
 from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fatball.library import repo
 
@@ -16,6 +23,8 @@ SETTING = "notifications"
 SETTLE = timedelta(seconds=90)  # a visit may still grow while the bird is around
 RECENT = timedelta(minutes=30)  # an older visit (a backfill, a Retry) is marked without a banner
 SHOWN_NAMES = 3
+# Where Homebrew puts it: a LaunchAgent's PATH has neither folder.
+TERMINAL_NOTIFIER_PLACES = (Path("/opt/homebrew/bin/terminal-notifier"), Path("/usr/local/bin/terminal-notifier"))
 _SCRIPT = "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
 
 
@@ -34,8 +43,25 @@ def messages(rows: Sequence) -> list[str]:
     return out
 
 
-def send_banner(title: str, body: str) -> None:
-    """Show a macOS banner. The text goes in as arguments, never into the script. Failures are only logged."""
+def terminal_notifier() -> str | None:
+    """The terminal-notifier program, if installed."""
+    found = shutil.which("terminal-notifier")
+    if found:
+        return found
+    return next((str(p) for p in TERMINAL_NOTIFIER_PLACES if os.access(p, os.X_OK)), None)
+
+
+def send_banner(title: str, body: str, url: str | None = None) -> None:
+    """Show a macOS banner; with terminal-notifier, a click opens `url`. The text always goes in as separate
+    arguments, never into a script. Failures are only logged."""
+    tool = terminal_notifier()
+    if tool is not None:
+        cmd = [tool, "-title", title, "-message", body] + (["-open", url] if url else [])
+        try:
+            subprocess.run(cmd, check=True, timeout=10, capture_output=True)
+            return
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("terminal-notifier failed (%s); using osascript", exc)
     try:
         subprocess.run(["osascript", "-e", _SCRIPT, "--", title, body], check=True, timeout=10,
                        capture_output=True)

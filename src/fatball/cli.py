@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import functools
 import getpass
 import ipaddress
 import logging
@@ -193,7 +194,8 @@ def serve(settings: Settings, *, host: str, port: int, watcher_options: dict | N
         threading.Thread(target=processor_loop, args=(processor, stop), name="processor", daemon=True),
     ]
     if notifier_conn is not None:
-        threads.append(threading.Thread(target=notify.notifier_loop, args=(notifier_conn, stop, datetime.now),
+        send = functools.partial(notify.send_banner, url=f"http://localhost:{port}/")  # a click opens Today
+        threads.append(threading.Thread(target=notify.notifier_loop, args=(notifier_conn, stop, datetime.now, send),
                                         name="notifier", daemon=True))
     for t in threads:
         t.start()
