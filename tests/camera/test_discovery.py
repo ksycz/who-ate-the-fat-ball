@@ -21,7 +21,31 @@ def test_arp_table_finds_mac_with_dropped_leading_zeros(fake_camera, monkeypatch
 
 def test_scan_finds_open_port_on_the_subnet(fake_camera, monkeypatch):
     monkeypatch.setattr(discovery, "arp_table", dict)
-    assert discovery.find_camera("127.0.0.0/30", fake_camera.port, "aa:bb:cc:dd:ee:ff") == "127.0.0.1"
+    assert discovery.find_camera("127.0.0.0/30", fake_camera.port, None) == "127.0.0.1"
+
+
+def test_scan_with_a_known_mac_skips_a_device_with_another_mac(fake_camera, monkeypatch):
+    monkeypatch.setattr(discovery, "arp_table", lambda: {"11:11:11:11:11:11": "127.0.0.1"})
+    assert discovery.find_camera("127.0.0.0/30", fake_camera.port, "aa:bb:cc:dd:ee:ff") is None
+
+
+def test_scan_with_a_known_mac_accepts_the_matching_device(fake_camera, monkeypatch):
+    tables = iter([{}, {"aa:bb:cc:dd:ee:ff": "127.0.0.1"}])  # the ARP entry appears once the port answered
+    monkeypatch.setattr(discovery, "arp_table", lambda: next(tables))
+    assert discovery.find_camera("127.0.0.0/30", fake_camera.port, "AA-BB-CC-DD-EE-FF") == "127.0.0.1"
+
+
+def test_mac_of_reads_the_arp_table_for_an_ip(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, ARP, ""))
+    assert discovery.mac_of("192.168.1.1") == "00:11:22:33:44:55"
+    assert discovery.mac_of("192.168.1.9") is None  # (incomplete)
+    assert discovery.mac_of("192.168.1.200") is None
+
+
+def test_same_mac_ignores_case_separators_and_leading_zeros():
+    assert discovery.same_mac("0:1B:2c:3:4:5", "00-1b-2C-03-04-05")
+    assert not discovery.same_mac("00:1b:2c:03:04:05", "00:1b:2c:03:04:06")
+    assert not discovery.same_mac(None, "00:1b:2c:03:04:05")
 
 
 def test_arp_lookup_normalises_the_mac(monkeypatch):

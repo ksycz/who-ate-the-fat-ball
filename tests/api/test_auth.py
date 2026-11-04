@@ -68,6 +68,26 @@ def test_unlock_wrong_pin_401_and_locks_after_five_for_15_min(make_client, clock
     assert lan.post("/api/unlock", json={"pin": "1234"}).status_code == 204
 
 
+def test_ten_wrong_pins_from_any_addresses_lock_every_device_for_the_hour(make_client, clock):
+    """Per-address lockout alone lets a device that switches addresses keep guessing the 4-digit PIN."""
+    _set_pin(make_client(LOCAL))
+    for i in range(10):
+        clock.advance(minutes=1)
+        assert make_client((f"192.168.1.{60 + i}", 1)).post("/api/unlock", json={"pin": "0000"}).status_code == 401
+    phone = make_client(("192.168.1.99", 1))
+    assert phone.post("/api/unlock", json={"pin": "1234"}).status_code == 429  # even the right one
+    clock.advance(minutes=50, seconds=59)  # the first wrong PIN is still under an hour old
+    assert phone.post("/api/unlock", json={"pin": "1234"}).status_code == 429
+    clock.advance(seconds=2)
+    assert phone.post("/api/unlock", json={"pin": "1234"}).status_code == 204
+
+
+def test_a_right_pin_does_not_count_towards_the_overall_limit(make_client):
+    _set_pin(make_client(LOCAL))
+    for i in range(12):
+        assert make_client((f"192.168.1.{60 + i}", 1)).post("/api/unlock", json={"pin": "1234"}).status_code == 204
+
+
 def test_success_resets_failure_count(make_client):
     _set_pin(make_client(LOCAL))
     lan = make_client(LAN)
@@ -146,3 +166,20 @@ def test_setup_rejects_loopback_with_foreign_origin(make_client):
     c = make_client(LOCAL)
     assert c.put("/api/setup", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
     assert c.put("/api/setup", json={}, headers={"Origin": "http://localhost:5173"}).status_code == 204
+
+
+def test_setup_with_a_new_camera_ip_forgets_the_remembered_mac(local, conn):
+    repo.upsert_camera(conn, "feeder", "aa:bb:cc:dd:ee:ff", "192.168.1.40")
+
+    assert local.put("/api/setup", json={"ip": "192.168.1.41"}).status_code == 204
+
+    camera = repo.get_camera(conn)
+    assert (camera.last_ip, camera.mac) == ("192.168.1.41", None)
+
+
+def test_setup_without_an_ip_keeps_the_remembered_mac(local, conn):
+    repo.upsert_camera(conn, "feeder", "aa:bb:cc:dd:ee:ff", "192.168.1.40")
+
+    assert local.put("/api/setup", json={"edit_pin": "1234"}).status_code == 204
+
+    assert repo.get_camera(conn).mac == "aa:bb:cc:dd:ee:ff"

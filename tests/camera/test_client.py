@@ -2,7 +2,9 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from fatball.camera import client as client_mod
 from fatball.camera.client import (
+    CameraError,
     CameraUnreachable,
     DownloadInterrupted,
     WrongPassword,
@@ -141,3 +143,32 @@ def test_list_files_stops_when_a_page_adds_nothing_new(fake_camera):
         cam.login("admin", "")
         files = cam.list_files(date(2026, 10, 30), "h264")
     assert len(files) == 64
+
+
+def test_download_with_no_size_stops_at_the_cap_and_keeps_no_file(fake_camera, tmp_path, monkeypatch):
+    """A camera that reports no size (or a fake one) must not be able to fill the disk."""
+    monkeypatch.setattr(client_mod, "MAX_DOWNLOAD_BYTES", 40_000)
+    fake_camera.add_file(FakeFile(BEGIN, END, "h264", b"q" * 100_000, reported_kb=0))
+    dest = tmp_path / "clip.raw"
+    with _client(fake_camera) as cam:
+        cam.login("admin", "")
+        [f] = cam.list_files(date(2026, 10, 30), "h264")
+        assert f.size_kb == 0
+        with pytest.raises(CameraError, match="too large"):
+            cam.download(f, dest)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_packet_claiming_a_huge_length_is_refused_before_reading_it():
+    import socket
+
+    from fatball.camera.protocol import HEADER
+
+    ours, theirs = socket.socketpair()
+    conn = object.__new__(client_mod._Conn)
+    conn.sock = ours
+    theirs.sendall(HEADER.pack(0xFF, 0, 1, 1, 1426, client_mod.MAX_PACKET_BYTES + 1))
+    with pytest.raises(CameraError, match="too large"):
+        conn.read_packet()
+    ours.close()
+    theirs.close()

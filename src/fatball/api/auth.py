@@ -11,6 +11,7 @@ import re
 import secrets as pysecrets
 import sqlite3
 import threading
+from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -25,6 +26,10 @@ COOKIE = "fatball_editor"
 COOKIE_MAX_AGE_S = 400 * 24 * 3600
 MAX_FAILURES = 5
 LOCKOUT = timedelta(minutes=15)
+# Across all addresses: a device that switches addresses (or several devices) gets 10 guesses an hour,
+# so the 10 000 possible PINs take months, not days. The Mac itself never needs the PIN.
+MAX_FAILURES_ANY_IP = 10
+FAILURE_WINDOW = timedelta(hours=1)
 PIN_KEY = "edit_pin_hash"
 TOKENS_KEY = "editor_tokens"
 PIN_RE = re.compile(r"[0-9]{4}")  # ASCII digits only
@@ -35,7 +40,7 @@ LOCAL_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class Locked(Exception):
-    """Too many wrong PINs from this IP."""
+    """Too many wrong PINs from this IP, or from all addresses together in the last hour."""
 
 
 def _hostname_is_local(value: str | None) -> bool:
@@ -87,6 +92,7 @@ class Auth:
         self._lockout_lock = threading.Lock()
         self._failures: dict[str, int] = {}
         self._locked_until: dict[str, datetime] = {}
+        self._recent_failures: deque[datetime] = deque()  # every address's wrong PINs, oldest first
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
@@ -123,19 +129,26 @@ class Auth:
         concurrent guesses cannot slip past the limit; a success clears the count.
         """
         with self._lockout_lock:
+            now = self.now()
+            while self._recent_failures and self._recent_failures[0] <= now - FAILURE_WINDOW:
+                self._recent_failures.popleft()
+            if len(self._recent_failures) >= MAX_FAILURES_ANY_IP:
+                raise Locked
             until = self._locked_until.get(ip)
-            if until is not None and self.now() >= until:
+            if until is not None and now >= until:
                 del self._locked_until[ip]
                 self._failures.pop(ip, None)
             if self._failures.get(ip, 0) >= MAX_FAILURES:
                 raise Locked
             self._failures[ip] = self._failures.get(ip, 0) + 1
+            self._recent_failures.append(now)
             if self._failures[ip] >= MAX_FAILURES:
-                self._locked_until[ip] = self.now() + LOCKOUT
+                self._locked_until[ip] = now + LOCKOUT
         if valid_pin_format(pin) and self._pin_matches(pin):
             with self._lockout_lock:
                 self._failures.pop(ip, None)
                 self._locked_until.pop(ip, None)
+                self._recent_failures.remove(now)  # this attempt was right after all
             return self._issue_token()
         return None
 

@@ -28,6 +28,10 @@ _WRONG_PASSWORD = {203, 205}
 _LOCKED = 206
 # The real camera's FileLength over-reports by ~1%, so a complete file can be a bit under size_kb*1024.
 MIN_COMPLETE_RATIO = 0.9
+# Limits on what the camera (or something pretending to be it) can make us store or hold in memory.
+# A real clip is a few MB, and its packets are far below 1 MB.
+MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
+MAX_PACKET_BYTES = 16 * 1024 * 1024
 QUERY_PAGE_SIZE = 64  # the camera returns at most this many files per query
 
 
@@ -71,6 +75,8 @@ class _Conn:
     def read_packet(self) -> tuple[int, bytes]:
         """Return (msg_id, body). Raises ConnectionError if the peer closed."""
         _, msg_id, length = decode_header(self._read(HEADER.size))
+        if length > MAX_PACKET_BYTES:
+            raise CameraError(f"camera packet too large ({length} bytes)")
         return msg_id, self._read(length) if length else b""
 
     def _read(self, n: int) -> bytes:
@@ -214,6 +220,8 @@ class XMClient:
                         break
                     if msg_id != PLAY_DATA:  # JSON status message, not media
                         continue
+                    if total + len(body) > MAX_DOWNLOAD_BYTES:
+                        raise CameraError(f"download too large (over {MAX_DOWNLOAD_BYTES} bytes): {f.sd_path}")
                     out.write(body)
                     total += len(body)
                     if expected and total >= expected * 1.5:

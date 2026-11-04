@@ -48,6 +48,7 @@ def test_status_reports_the_servers_day(local):
     ("no_password", "problem"),
     ("low_disk", "problem"),
     ("internal_error", "problem"),
+    ("other_device", "problem"),
 ])
 def test_status_dot_follows_last_seen_except_actionable_errors(local, conn, cam, error, state):
     repo.update_camera_status(conn, cam, last_seen_at=NOW - timedelta(minutes=1), last_error=error)

@@ -41,6 +41,16 @@ def arp_lookup(mac: str) -> str | None:
     return arp_table().get(_norm_mac(mac))
 
 
+def mac_of(ip: str) -> str | None:
+    """The MAC the ARP table gives for `ip` (normalised), or None. Ask after a TCP connect to `ip`,
+    so the entry is fresh."""
+    return next((mac for mac, addr in arp_table().items() if addr == ip), None)
+
+
+def same_mac(a: str | None, b: str | None) -> bool:
+    return a is not None and b is not None and _norm_mac(a) == _norm_mac(b)
+
+
 def local_ipv4() -> str | None:
     """This machine's LAN address (a UDP connect sends nothing)."""
     try:
@@ -59,7 +69,9 @@ def _network(subnet: str) -> ipaddress.IPv4Network:
 
 
 def find_camera(subnet: str, port: int, mac: str | None) -> str | None:
-    """Cached IP first (when `subnet` is an address), then the ARP table for `mac`, then a /24 scan."""
+    """Cached IP first (when `subnet` is an address), then the ARP table for `mac`, then a /24 scan.
+
+    The cached IP is only a guess: the watcher checks the MAC of whatever host this returns."""
     if "/" not in subnet and is_open(subnet, port):
         return subnet
     if mac:
@@ -68,8 +80,12 @@ def find_camera(subnet: str, port: int, mac: str | None) -> str | None:
             return ip
     hosts = [str(h) for h in _network(subnet).hosts()]
     with ThreadPoolExecutor(max_workers=64) as pool:
-        for host, ok in zip(hosts, pool.map(lambda h: is_open(h, port), hosts)):
-            if ok:
-                log.info("camera found at %s:%d", host, port)
-                return host
+        open_hosts = [host for host, ok in zip(hosts, pool.map(lambda h: is_open(h, port), hosts)) if ok]
+    for host in open_hosts:
+        # With a known MAC, only that device is the camera: another one with the port open never gets
+        # the login (which carries the password hash).
+        if mac is None or same_mac(mac_of(host), mac):
+            log.info("camera found at %s:%d", host, port)
+            return host
+        log.warning("%s:%d answered but is not the camera (different MAC address)", host, port)
     return None

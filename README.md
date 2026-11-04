@@ -116,6 +116,9 @@ The camera link is the only code that speaks the Xiongmai protocol, and the libr
 - Everything stays on your home network. There is no account, no cloud and no subscription.
 - The camera password is stored only in the macOS Keychain, never in the database, files or logs.
 - The edit PIN is stored as a salted hash. Viewing needs no login; changing data needs the PIN or a request from the Mac itself.
+- Wrong PINs lock an address out for 15 minutes after 5 tries, and every device after 10 tries in an hour.
+- The app remembers the camera's MAC address after the first good login, and never sends the camera login to another device. If you replace the camera, enter its IP address again in `fatball setup`.
+- No other website can show the gallery inside its own page.
 - Real footage and camera identifiers are never committed. Test video is generated with ffmpeg.
 
 ## Bird recognition model

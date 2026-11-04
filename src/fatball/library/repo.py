@@ -89,6 +89,15 @@ def get_camera(conn: sqlite3.Connection) -> Camera | None:
     return Camera(**values)
 
 
+def set_camera_ip(conn: sqlite3.Connection, name: str, ip: str) -> int:
+    """The owner gave the camera's IP: save it and forget the remembered MAC, so a replaced camera is
+    accepted (the watcher remembers the new MAC on the first good login)."""
+    camera_id = upsert_camera(conn, name, None, ip)
+    conn.execute("UPDATE camera SET mac = NULL WHERE id = ?", (camera_id,))
+    conn.commit()
+    return camera_id
+
+
 def update_camera_status(
     conn: sqlite3.Connection,
     camera_id: int,
