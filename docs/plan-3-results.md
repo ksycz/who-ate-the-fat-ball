@@ -30,7 +30,7 @@ Videos, By species, select and bulk move, zip downloads, Mac drag-and-drop, Othe
 
 ## Screenshots
 
-From demo mode (`uv run fatball demo`), with generated test-pattern clips, never real footage.
+From demo mode (`uv run fatball demo`), with plain-colour placeholder clips, never real footage.
 
 | Mac: Today | Mac: Birds |
 |---|---|

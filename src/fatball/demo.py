@@ -25,6 +25,9 @@ FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
 _PARAM_SETS = {32, 33, 34, 35, 39}  # VPS, SPS, PPS, AUD, prefix SEI: start a new access unit
 _KEY_SLICES = range(16, 22)
 DEMO_CLIP_SECONDS = 2
+# Calm single-colour clips for the demo (and so for the README screenshots): soft tones that sit
+# with the gallery's cream and robin palette instead of a busy test pattern.
+DEMO_COLOURS = ("A9B79F", "D8C7AE", "B9C6CC", "C9A991", "9FAE93", "CFC3B4")
 
 
 def _split_access_units(stream: bytes) -> list[tuple[bool, bytes]]:
@@ -59,7 +62,8 @@ def _split_access_units(stream: bytes) -> list[tuple[bool, bytes]]:
 def make_xm_clip(seconds: float = 2, fps: int = 12, *, width: int = 320, height: int = 180,
                  source: str = "testsrc", hue: int = 0) -> bytes:
     """A synthetic HEVC clip (ffmpeg `source` pattern, hue-shifted by `hue` degrees) in Xiongmai framing."""
-    video = f"{source}=size={width}x{height}:rate={fps}"
+    joiner = ":" if "=" in source else "="  # a source may bring its own options, e.g. "color=c=0xA9B79F"
+    video = f"{source}{joiner}size={width}x{height}:rate={fps}"
     cmd = [FFMPEG, "-loglevel", "error", "-f", "lavfi", "-i", video, "-t", str(seconds)]
     if hue:
         cmd += ["-vf", f"hue=h={hue}"]
@@ -83,7 +87,7 @@ def build_demo_camera(n_clips: int = 12, days: int = 2, *, now: datetime | None 
     for i in range(n_clips):
         end = now - timedelta(minutes=1) - i * step
         begin = end - timedelta(seconds=DEMO_CLIP_SECONDS)
-        payload = make_xm_clip(DEMO_CLIP_SECONDS, source="testsrc2", hue=(i * 360 // n_clips) % 360)
+        payload = make_xm_clip(DEMO_CLIP_SECONDS, source=f"color=c=0x{DEMO_COLOURS[i % len(DEMO_COLOURS)]}")
         files.append(FakeFile(begin, end, "h264", payload))
     return FakeCamera(password="", files=files, clock=now)
 
