@@ -12,7 +12,7 @@ import numpy as np
 
 from fatball.recognition.detector import Detection
 
-DET_MIN = 0.3
+DET_MIN = 0.2  # close-up birds (against the lens, half hidden) score 0.2-0.3; see docs/recognition-close-ups.md
 PERSON_MIN = 0.5
 PERSON_FRAMES = 2
 K = 5

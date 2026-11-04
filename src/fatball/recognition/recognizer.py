@@ -1,6 +1,7 @@
 """Recognise one clip end to end: frames -> detections -> features -> stored rows -> verdict -> best frame."""
 
 import json
+import logging
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -13,8 +14,10 @@ from fatball.library import repo
 from fatball.library.repo import Clip, NewDetection
 from fatball.media.convert import extract_frames
 from fatball.recognition.detector import Detection
-from fatball.recognition.features import feature_print, to_blob
+from fatball.recognition.features import FeatureFailed, feature_print, to_blob
 from fatball.recognition.matcher import DET_MIN, Crop, ExampleMatrix, Verdict, match
+
+log = logging.getLogger(__name__)
 
 
 class DetectorLike(Protocol):
@@ -89,7 +92,12 @@ class Recognizer:
                         continue
                     feature = None
                     if det.cls == "animal" and det.conf >= DET_MIN:
-                        feature = self.features(frame, det.box)
+                        try:
+                            feature = self.features(frame, det.box)
+                        except FeatureFailed as e:  # e.g. a sliver at the frame edge: skip the box, keep the clip
+                            log.info("skipping a box Vision could not describe: %s", e)
+                            rows.append(NewDetection(index, det.cls, det.conf, det.box, None))
+                            continue
                     crops.append(Crop(index, det, feature))
                     rows.append(NewDetection(index, det.cls, det.conf, det.box,
                                              None if feature is None else to_blob(feature)))

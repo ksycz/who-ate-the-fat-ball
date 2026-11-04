@@ -22,6 +22,10 @@ def _padded_roi(box: tuple[float, float, float, float], pad: float) -> tuple[flo
     return x1, 1.0 - y2, x2 - x1, y2 - y1
 
 
+class FeatureFailed(RuntimeError):
+    """Vision could not describe this box (for example one too small to crop)."""
+
+
 def feature_print(image_path: Path, box: tuple[float, float, float, float], pad: float = 0.15) -> np.ndarray:
     """A float32 unit vector describing the padded box of the image."""
     import Foundation
@@ -34,7 +38,7 @@ def feature_print(image_path: Path, box: tuple[float, float, float, float], pad:
     request.setRegionOfInterest_(((x, y), (w, h)))
     ok, error = handler.performRequests_error_([request], None)
     if not ok:
-        raise RuntimeError(f"feature print failed for {image_path}: {error}")
+        raise FeatureFailed(f"feature print failed for {image_path}: {error}")
     obs = request.results()[0]
     if obs.elementType() != _FLOAT32:
         raise RuntimeError(f"unexpected feature print element type {obs.elementType()}")

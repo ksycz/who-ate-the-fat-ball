@@ -532,3 +532,15 @@ def test_cli_notifications_toggle(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out.strip() == "Mac banners are off."
     assert cli.main(["notifications", "on"]) == 0
     assert capsys.readouterr().out.strip() == "Mac banners are on."
+
+
+def test_recheck_empty_queues_empty_visits_for_the_running_app(tmp_path, capsys, monkeypatch):
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.data_dir.mkdir()
+    monkeypatch.setattr(cli.repo, "requeue_empty_visits", lambda conn: 18)
+
+    assert cli.build_parser().parse_args(["recheck-empty"]).command == "recheck-empty"
+    assert cli.run_recheck_empty(settings) == 0
+
+    out = capsys.readouterr().out
+    assert "18 clips" in out and "fatball serve" in out

@@ -480,6 +480,19 @@ def clips_for_visit(conn: sqlite3.Connection, visit_id: int) -> list[Clip]:
     return [row_to_clip(r) for r in rows]
 
 
+def requeue_empty_visits(conn: sqlite3.Connection) -> int:
+    """Queue every clip of an "empty" (subject nothing) visit for recognition again, so a better rule can find the
+    birds it missed; visits the owner moved stay as they are. Returns how many clips were queued."""
+    cur = conn.execute(
+        "UPDATE clip SET recognition_error = NULL, recognized_at = NULL, recognition_wanted = 1 "
+        "WHERE deleted_at IS NULL AND status = 'ready' AND web_path IS NOT NULL AND id IN ("
+        "SELECT vc.clip_id FROM visit_clip vc JOIN visit v ON v.id = vc.visit_id "
+        "WHERE v.subject = 'nothing' AND v.moved_by_user = 0)"
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def requeue_recognition(conn: sqlite3.Connection, clip_id: int) -> bool:
     """Clear both recognition markers and mark the clip wanted, so the processor recognises it again even with
     the backfill off; False for an unknown clip."""

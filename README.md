@@ -151,6 +151,8 @@ Recognition waits while there are no examples at all. Clips still convert and pl
 
 Only new clips are recognised by default; `/api/status` shows `recognition.old_waiting` for the older ones. Recognise some now with `uv run fatball recognize-old --limit 20` (add `--newest-first` to start from the latest; Ctrl-C stops after the current clip), or let the app work through all of them slowly in the background with `uv run fatball recognize-old --background on` (`off` turns it back off). Retrying a clip always recognises it.
 
+After a recognition fix, `uv run fatball recheck-empty` queues every "Empty clip" visit to be recognised again, so birds that were missed can be found. Visits you moved yourself stay as they are. [Why close-up birds were missed](docs/recognition-close-ups.md) has the details.
+
 A Mac banner announces new bird visits (and new species) while `fatball serve` runs; `uv run fatball notifications off` silences it (`on` turns it back on, no argument shows the state).
 
 To make a click on the banner open the gallery, install terminal-notifier once with `brew install terminal-notifier`, then restart `fatball serve`. If macOS asks whether "terminal-notifier" may send notifications, click **Allow**. Without it, banners still appear, but a click opens Script Editor.

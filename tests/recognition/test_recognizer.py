@@ -12,6 +12,7 @@ from fatball.media.convert import FFMPEG
 from fatball.recognition import qos
 from fatball.recognition.detector import Detection
 from fatball.recognition.fake import FakeDetector
+from fatball.recognition.features import FeatureFailed
 from fatball.recognition.recognizer import Recognizer, verdict_to_json
 
 BOX = (0.2, 0.2, 0.6, 0.6)
@@ -114,13 +115,13 @@ def test_no_best_frame_stores_null(setup):
 
 def test_features_only_for_confident_animal_boxes(setup):
     settings, conn, clip = setup
-    script = {0: [_animal(0.29), _animal(0.3), Detection("person", 0.9, BOX), Detection("vehicle", 0.9, BOX)]}
+    script = {0: [_animal(0.19), _animal(0.2), Detection("person", 0.9, BOX), Detection("vehicle", 0.9, BOX)]}
     spy = Spy()
     Recognizer(settings, conn, FakeDetector(script), spy).recognize(clip)
     assert len(spy.calls) == 1
     rows = conn.execute("SELECT cls, conf, feature IS NULL AS no_feature FROM detection ORDER BY conf").fetchall()
     assert [(r["cls"], r["conf"], bool(r["no_feature"])) for r in rows] == [
-        ("animal", 0.29, True), ("animal", 0.3, False), ("person", 0.9, True)]
+        ("animal", 0.19, True), ("animal", 0.2, False), ("person", 0.9, True)]
 
 
 def test_rerecognize_keeps_labelled_detections(setup):
@@ -186,3 +187,21 @@ def test_zero_area_box_does_not_fail_the_clip(setup):
     rows = conn.execute("SELECT feature FROM detection WHERE clip_id = ?", (clip.id,)).fetchall()
     assert len(rows) == 1 and rows[0]["feature"] is not None
     assert [box for _, box in spy.calls] == [BOX]
+
+
+def test_a_box_vision_cannot_crop_is_skipped_not_fatal(setup):
+    """Vision refuses near-zero crops; one such box must not fail the whole clip (seen with a 0.2 cutoff)."""
+    settings, conn, clip = setup
+    tiny = Detection("animal", 0.5, (0.9995, 0.5, 1.0, 0.5005))
+    spy = Spy()
+
+    def features(path, box):
+        if box == tiny.box:
+            raise FeatureFailed("Operation failed due to attempt to crop zero or near zero dimensioned area")
+        return spy(path, box)
+
+    verdict = Recognizer(settings, conn, FakeDetector({0: [tiny, _animal(0.9)]}), features).recognize(clip)
+
+    assert verdict.subject != "nothing"  # the good box still counts
+    rows = conn.execute("SELECT conf, feature IS NULL AS no_feature FROM detection ORDER BY conf").fetchall()
+    assert [(r["conf"], bool(r["no_feature"])) for r in rows] == [(0.5, True), (0.9, False)]

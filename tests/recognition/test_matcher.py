@@ -54,6 +54,17 @@ def test_single_person_frame_is_not_enough():
     assert v.subject == "species"
 
 
+def test_a_weak_close_up_bird_still_counts():
+    """A tit right against the lens scores only 0.2-0.3 with the detector (seen on the real camera)."""
+    v = match([crop(GREAT, 0, conf=0.23)], examples(GREAT, 5), category_for)
+    assert (v.subject, v.species) == ("species", GREAT)
+
+
+def test_an_animal_box_under_the_cutoff_is_ignored():
+    v = match([crop(GREAT, 0, conf=0.19)], examples(GREAT, 5), category_for)
+    assert v.subject == "nothing"
+
+
 def test_no_animal_crops_is_nothing():
     v = match([crop(GREAT, 0, conf=0.1), crop(None, 1, cls="vehicle")], examples(GREAT, 5), category_for)
     assert (v.subject, v.category, v.species) == ("nothing", "other", None)
