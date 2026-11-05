@@ -157,6 +157,17 @@ A Mac banner announces new bird visits (and new species) while `fatball serve` r
 
 To make a click on the banner open the gallery, install terminal-notifier once with `brew install terminal-notifier`, then restart `fatball serve`. If macOS asks whether "terminal-notifier" may send notifications, click **Allow**. Without it, banners still appear, but a click opens Script Editor.
 
+If the log says macOS isn't allowing terminal-notifier's banners, turn it on under **System Settings → Notifications → terminal-notifier**. If it isn't listed there and macOS never asks, copy it to your Applications folder once and run the copy, which got macOS to list it on the owner's Mac (macOS 26):
+
+```sh
+mkdir -p ~/Applications
+cp -R "$(brew --prefix terminal-notifier)/terminal-notifier.app" ~/Applications/
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ~/Applications/terminal-notifier.app
+~/Applications/terminal-notifier.app/Contents/MacOS/terminal-notifier -message "Test"
+```
+
+Then allow it in System Settings. After that you can delete the copy; the permission stays. `terminal-notifier -diagnose` shows where things stand.
+
 ### Your library is backed up before an upgrade
 
 Before the app upgrades an existing library to a newer format, it saves a copy next to it, for example `library.sqlite.v1.bak` in `~/Library/Application Support/WhoAteTheFatBall/`. Upgrades can't be undone, so keep that file until you're happy with the new version. An existing backup is never overwritten.

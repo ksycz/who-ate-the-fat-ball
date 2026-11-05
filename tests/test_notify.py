@@ -143,6 +143,19 @@ def test_a_failing_terminal_notifier_falls_back_to_osascript(monkeypatch):
     assert calls == [TN, "osascript"]
 
 
+def test_terminal_notifier_without_permission_says_what_to_allow(monkeypatch, caplog):
+    monkeypatch.setattr(notify, "terminal_notifier", lambda: TN)
+
+    def run(cmd, **kw):
+        if cmd[0] == TN:
+            raise subprocess.CalledProcessError(notify.NOT_AUTHORIZED, cmd)
+
+    monkeypatch.setattr(notify.subprocess, "run", run)
+    with caplog.at_level("WARNING", logger="fatball.notify"):
+        notify.send_banner("Title", "Body", url="http://localhost:8080/")
+    assert "System Settings > Notifications" in caplog.text
+
+
 def test_terminal_notifier_is_found_in_homebrew_even_off_the_path(monkeypatch, tmp_path):
     tool = tmp_path / "terminal-notifier"
     tool.write_text("#!/bin/sh\n")

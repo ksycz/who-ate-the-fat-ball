@@ -23,6 +23,7 @@ SETTING = "notifications"
 SETTLE = timedelta(seconds=90)  # a visit may still grow while the bird is around
 RECENT = timedelta(minutes=30)  # an older visit (a backfill, a Retry) is marked without a banner
 SHOWN_NAMES = 3
+NOT_AUTHORIZED = 3  # terminal-notifier's exit status when macOS hasn't allowed its notifications
 # Where Homebrew puts it: a LaunchAgent's PATH has neither folder.
 TERMINAL_NOTIFIER_PLACES = (Path("/opt/homebrew/bin/terminal-notifier"), Path("/usr/local/bin/terminal-notifier"))
 _SCRIPT = "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
@@ -60,6 +61,12 @@ def send_banner(title: str, body: str, url: str | None = None) -> None:
         try:
             subprocess.run(cmd, check=True, timeout=10, capture_output=True)
             return
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode == NOT_AUTHORIZED:
+                log.warning("macOS isn't allowing terminal-notifier's banners; using osascript, so a click won't "
+                            "open the gallery. Turn it on in System Settings > Notifications > terminal-notifier.")
+            else:
+                log.warning("terminal-notifier failed (%s); using osascript", exc)
         except (OSError, subprocess.SubprocessError) as exc:
             log.warning("terminal-notifier failed (%s); using osascript", exc)
     try:
