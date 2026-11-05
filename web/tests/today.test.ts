@@ -105,7 +105,7 @@ describe("Today", () => {
     expect(screen.getByText("6 visits · first at 07:21")).toBeTruthy();
     expect(screen.getByText("14 visits · 6 species")).toBeTruthy();
     const cards = screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("/visit/"));
-    expect(cards.map((a) => a.getAttribute("href"))).toEqual(["/visit/2", "/visit/1"]);
+    expect(cards.map((a) => a.getAttribute("href"))).toEqual(["/visit/2?list=day%3D2026-11-03", "/visit/1?list=day%3D2026-11-03"]);
     expect(cards[0].textContent).toContain("Eurasian nuthatch");
     expect(cards[0].textContent).toContain("09:12 · stayed 2 min");
     expect(cards[0].textContent).toContain("▶ 0:24 · 3 clips");

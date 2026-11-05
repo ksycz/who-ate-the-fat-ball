@@ -8,7 +8,6 @@
   import Species from "./pages/Species.svelte";
   import VisitList from "./pages/VisitList.svelte";
   import Today from "./pages/Today.svelte";
-  import Videos from "./pages/Videos.svelte";
   import Stats from "./pages/Stats.svelte";
   import Visit from "./pages/Visit.svelte";
   import More from "./pages/More.svelte";
@@ -19,7 +18,6 @@
 
   const pages = {
     today: Today,
-    videos: Videos,
     stats: Stats,
     visit: Visit,
     "birds-species": Species,
@@ -43,7 +41,7 @@
   );
   // Pages of visit cards use the full width on a big screen (a grid of cards, as in the Mac prototype).
   const roomy = $derived(
-    listKind !== null || $route.name === "today" || $route.name === "videos" || $route.name === "stats" || $route.name === "birds-species" || $route.name === "species",
+    listKind !== null || $route.name === "today" || $route.name === "stats" || $route.name === "birds-species" || $route.name === "species",
   );
   const Page = $derived(listKind || $route.name === "species" ? null : pages[$route.name as keyof typeof pages]);
 
@@ -54,7 +52,7 @@
 
 <div class="shell">
   <NavSide />
-  <main data-route={$route.name} class:roomy class:feed={$route.name === "videos"}>
+  <main data-route={$route.name} class:roomy>
     {#if $route.name === "species"}
       {#key $route.params.scientific}<VisitList kind="birds" species={$route.params.scientific} />{/key}
     {:else if listKind}
@@ -77,10 +75,7 @@
     margin: 0 auto;
     padding: 0 20px 96px;
   }
-  /* The Videos feed is a dark page that runs edge to edge on a phone, with the bar's room kept below it. */
-  main.feed { max-width: none; padding: 0 0 var(--nav-phone-h); background: var(--ink); }
   @media (min-width: 768px) {
-    main.feed { padding: 28px 32px 40px; background: none; }
     main { max-width: 760px; padding: 28px 32px 40px; }
     main.roomy { max-width: 1240px; }
   }

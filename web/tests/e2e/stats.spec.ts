@@ -36,7 +36,7 @@ test("the phone bar has five tabs and the heatmap fits 390 px", async ({ page })
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/stats");
   const nav = page.getByRole("navigation", { name: "Main" }).filter({ visible: true });
-  await expect(nav.getByRole("link")).toHaveText(["Today", "Videos", "Birds", "Stats", "More"]);
+  await expect(nav.getByRole("link")).toHaveText(["Today", "Birds", "Stats", "More"]);
   await expect(nav.getByRole("link", { name: "Stats" })).toHaveAttribute("aria-current", "page");
   const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   expect(fits).toBe(true);

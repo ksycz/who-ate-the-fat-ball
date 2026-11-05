@@ -143,6 +143,54 @@ def test_patch_dog_goes_to_other_and_category_only_drops_contradicting_species(l
     assert conn.execute("SELECT species_id FROM visit WHERE id = ?", (w,)).fetchone()[0] is None
 
 
+def _no_video(conn, visit_id):
+    conn.execute("UPDATE clip SET web_path = NULL WHERE id IN (SELECT clip_id FROM visit_clip WHERE visit_id = ?)",
+                 (visit_id,))
+    conn.commit()
+
+
+def test_neighbours_follow_the_list_newest_first(local, conn, cam):
+    a = add_visit(conn, cam, 0, sure())[1]
+    b = add_visit(conn, cam, 1000, sure(BLUE))[1]
+    add_visit(conn, cam, 2000, sure(DOG, category="other"))
+    c = add_visit(conn, cam, 3000, sure())[1]
+    assert local.get(f"/api/visits/{b}/neighbours?category=birds").json() == {"previous": c, "next": a}
+    assert local.get(f"/api/visits/{c}/neighbours?category=birds").json() == {"previous": None, "next": b}
+    assert local.get(f"/api/visits/{a}/neighbours?category=birds").json() == {"previous": b, "next": None}
+    # only that species, as on a species page
+    assert local.get(f"/api/visits/{c}/neighbours?category=birds&species={GREAT}").json() == {
+        "previous": None, "next": a}
+
+
+def test_neighbours_keep_their_place_after_the_visit_leaves_the_list(local, conn, cam):
+    a = add_visit(conn, cam, 0, sure())[1]
+    b = add_visit(conn, cam, 1000, sure())[1]
+    c = add_visit(conn, cam, 2000, sure())[1]
+    local.patch(f"/api/visits/{b}", json={"category": "other"})
+    assert local.get(f"/api/visits/{b}/neighbours?category=birds").json() == {"previous": c, "next": a}
+
+
+def test_neighbours_skip_visits_without_a_video(local, conn, cam):
+    a = add_visit(conn, cam, 0, sure())[1]
+    b = add_visit(conn, cam, 1000, sure())[1]
+    c = add_visit(conn, cam, 2000, sure())[1]
+    _no_video(conn, b)
+    assert local.get(f"/api/visits/{c}/neighbours?category=birds").json()["next"] == a
+
+
+def test_neighbours_filters_and_errors(local, conn, cam):
+    a = add_visit(conn, cam, 0, sure())[1]
+    d = add_visit(conn, cam, 1000, sure(DOG, category="other"))[1]
+    e = add_visit(conn, cam, 2000, Verdict("other", None, 0.9, [], "nothing", None))[1]
+    assert local.get(f"/api/visits/{e}/neighbours?day=2026-10-30").json()["next"] == d  # Today mixes sections
+    assert local.get(f"/api/visits/{e}/neighbours?category=other&only=dogs").json()["next"] == d
+    conn.execute("UPDATE visit SET is_favourite = 1 WHERE id = ?", (a,))
+    conn.commit()
+    assert local.get(f"/api/visits/{e}/neighbours?favourite=true").json()["next"] == a
+    assert local.get(f"/api/visits/{a}/neighbours?only=dogs").status_code == 422
+    assert local.get("/api/visits/999/neighbours").status_code == 404
+
+
 def test_patch_validation(local, conn, cam):
     _, v = add_visit(conn, cam, 0, sure())
     assert local.patch(f"/api/visits/{v}", json={"species": "Nope nope"}).status_code == 422

@@ -185,7 +185,7 @@
       {/each}
 
       {#each data.visits as visit (visit.id)}
-        <VisitCard {visit} today={data.day} />
+        <VisitCard {visit} today={data.day} list="day={data.day}" />
       {/each}
     </div>
     {/if}

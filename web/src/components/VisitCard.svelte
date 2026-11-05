@@ -11,6 +11,7 @@
 
   // pending: the clip is still being recognised, so there is no visit page to open yet.
   // selecting: select mode, where the card is a checkbox and its link is inert.
+  // list: the query of the list this card is in, so the visit page can play on through that list.
   let {
     visit,
     today,
@@ -18,7 +19,8 @@
     selecting = false,
     selected = false,
     onselect,
-  }: { visit: Visit; today: string; pending?: boolean; selecting?: boolean; selected?: boolean; onselect?: () => void } = $props();
+    list = null,
+  }: { visit: Visit; today: string; pending?: boolean; selecting?: boolean; selected?: boolean; onselect?: () => void; list?: string | null } = $props();
 
   const image = $derived(visit.best_frame_url ?? visit.poster_url);
   // "% sure" only means something for a species the app picked; a correction or no species has none.
@@ -94,7 +96,7 @@
   <div class="cell" class:dragging={$dragged?.id === visit.id}>
     <a
       class="card"
-      href="/visit/{visit.id}"
+      href={list ? `/visit/${visit.id}?list=${encodeURIComponent(list)}` : `/visit/${visit.id}`}
       use:link
       draggable={movable ? "true" : undefined}
       ondragstart={movable ? dragstart : undefined}

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import Visit from "../src/pages/Visit.svelte";
 import { route } from "../src/lib/router";
 import { canEdit, NETWORK_TEXT, serverDay, toast } from "../src/lib/session";
@@ -52,6 +53,7 @@ let current: Detail;
 let serverDayFromApi = "2026-11-03";
 let statusDown = false;
 let patchDown = false;
+let around: { previous: number | null; next: number | null } = { previous: null, next: null };
 function serve(data: Detail, patched?: Partial<Detail>) {
   current = data;
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -66,6 +68,10 @@ function serve(data: Detail, patched?: Partial<Detail>) {
       return new Response(JSON.stringify({ day: serverDayFromApi }), { status: 200 });
     }
     if (url === "/api/visits/5/watched") return new Response(null, { status: 204 });
+    if (url === "/api/visits/6/watched") return new Response(null, { status: 204 });
+    if (url.startsWith("/api/visits/5/neighbours")) return new Response(JSON.stringify(around), { status: 200 });
+    if (url.startsWith("/api/visits/6/neighbours")) return new Response(JSON.stringify({ previous: 5, next: null }), { status: 200 });
+    if (url === "/api/visits/6") return new Response(JSON.stringify(detail({ id: 6, clips: [clip(9)] })), { status: 200 });
     return new Response(JSON.stringify({ detail: "not found" }), { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -78,6 +84,8 @@ function video(): HTMLVideoElement {
 beforeEach(() => {
   statusDown = false;
   patchDown = false;
+  around = { previous: null, next: null };
+  window.history.replaceState(null, "", "/visit/5");
   canEdit.set(true);
   toast.set(null);
   serverDay.set("2026-11-03");
@@ -298,6 +306,102 @@ describe("Visit", () => {
     expect(await screen.findByText("This visit doesn't exist any more")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Today/ }).getAttribute("href")).toBe("/");
   });
-});
 
-import { get } from "svelte/store";
+  describe("playing on", () => {
+    const neighbourUrls = () => fetchMock.mock.calls.map((c) => c[0] as string).filter((u) => u.includes("/neighbours"));
+
+    it("asks_for_neighbours_in_the_list_it_came_from", async () => {
+      window.history.replaceState(null, "", `/visit/5?list=${encodeURIComponent("category=birds&species=Parus major")}`);
+      serve(detail());
+      render(Visit);
+      await waitFor(() => expect(neighbourUrls()[0]).toBe("/api/visits/5/neighbours?category=birds&species=Parus major"));
+    });
+
+    it("without_a_list_uses_the_visits_own_section", async () => {
+      serve(detail({ category: "other" }));
+      render(Visit);
+      await waitFor(() => expect(neighbourUrls()[0]).toBe("/api/visits/5/neighbours?category=other"));
+    });
+
+    it("no_buttons_when_the_list_has_nothing_else", async () => {
+      serve(detail());
+      render(Visit);
+      await screen.findByRole("heading", { name: "Great tit" });
+      await waitFor(() => expect(neighbourUrls().length).toBe(1));
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+    });
+
+    it("next_keeps_the_list_replaces_history_and_starts_playing", async () => {
+      window.history.replaceState(null, "", "/visit/5?list=day%3D2026-11-03");
+      around = { previous: null, next: 6 };
+      serve(detail());
+      render(Visit);
+      const length = window.history.length;
+      expect((await screen.findByRole("button", { name: "Previous" }) as HTMLButtonElement).disabled).toBe(true);
+      const player = video();
+      await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/visit/6?list=day%3D2026-11-03"));
+      expect(window.history.length).toBe(length);
+      await waitFor(() => expect(video().src).toContain("/web/9.mp4"));
+      expect(video()).toBe(player); // the same element, so a phone lets it carry on playing
+      await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+    });
+
+    it("the_last_clip_ending_goes_to_the_next_visit", async () => {
+      around = { previous: null, next: 6 };
+      serve(detail());
+      render(Visit);
+      await screen.findByRole("button", { name: "Next" });
+      await fireEvent.ended(video()); // clip 1 ends: clip 2 of the same visit
+      expect(window.location.pathname).toBe("/visit/5");
+      await waitFor(() => expect(screen.getByRole("button", { name: /^Clip 2,/ }).getAttribute("aria-current")).toBe("true"));
+      await fireEvent.ended(video());
+      await waitFor(() => expect(window.location.pathname).toBe("/visit/6"));
+    });
+
+    it("the_last_clip_of_the_list_just_stops", async () => {
+      serve(detail({ clips: [clip(1)] }));
+      render(Visit);
+      await waitFor(() => expect(neighbourUrls().length).toBe(1));
+      await fireEvent.ended(video());
+      expect(window.location.pathname).toBe("/visit/5");
+    });
+
+    const swipe = async (el: Element, fromX: number, toX: number, toY = 100) => {
+      await fireEvent.pointerDown(el, { clientX: fromX, clientY: 100 });
+      await fireEvent.pointerUp(el, { clientX: toX, clientY: toY });
+    };
+
+    it("swiping_left_is_next_and_right_is_previous", async () => {
+      around = { previous: 6, next: null };
+      serve(detail());
+      render(Visit);
+      await screen.findByRole("button", { name: "Previous" });
+      const page = document.querySelector(".visit")!;
+      await swipe(page, 300, 100); // left, but there is no next
+      expect(window.location.pathname).toBe("/visit/5");
+      await swipe(page, 100, 300);
+      await waitFor(() => expect(window.location.pathname).toBe("/visit/6"));
+    });
+
+    it("scrolling_up_or_down_is_not_a_swipe", async () => {
+      around = { previous: 6, next: 6 };
+      serve(detail());
+      render(Visit);
+      await screen.findByRole("button", { name: "Next" });
+      await swipe(document.querySelector(".visit")!, 100, 170, 400);
+      expect(window.location.pathname).toBe("/visit/5");
+    });
+
+    it("arrow_keys_leave_the_players_own_seeking_alone", async () => {
+      around = { previous: null, next: 6 };
+      serve(detail());
+      render(Visit);
+      await screen.findByRole("button", { name: "Next" });
+      await fireEvent.keyDown(video(), { key: "ArrowRight" });
+      expect(window.location.pathname).toBe("/visit/5");
+      await fireEvent.keyDown(document.body, { key: "ArrowRight" });
+      await waitFor(() => expect(window.location.pathname).toBe("/visit/6"));
+    });
+  });
+});

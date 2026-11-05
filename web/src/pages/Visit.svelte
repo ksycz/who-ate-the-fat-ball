@@ -1,14 +1,20 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { ApiError, getJSON, send, type Guess, type VisitDetail } from "../lib/api";
-  import { route, back } from "../lib/router";
+  import { route, back, navigate } from "../lib/router";
   import { canEdit, changes, noteChanged, noteServerDay, serverDay, showSaveFailure, showToast } from "../lib/session";
   import { correctionText, dayOf, speciesLabel, sureChip, timeOfDay, visitName, visitTime } from "../lib/format";
   import { link } from "../lib/link";
   import Chip from "../components/Chip.svelte";
   import Picker from "../components/Picker.svelte";
 
+  const SWIPE_PX = 50;
+  const CONTROLS_PX = 48; // the native controls bar along the bottom of the video keeps its own drags
+
   let visit = $state<VisitDetail | null>(null);
+  let neighbours = $state<{ previous: number | null; next: number | null } | null>(null);
+  let start: { x: number; y: number } | null = null; // where a swipe began
+  let playingOn = false; // on the way to the next or previous visit: keep the player, and start it when it arrives
   let missing = $state(false);
   let failed = $state(false);
   let index = $state(0);
@@ -25,7 +31,10 @@
 
   $effect(() => {
     const current = id;
-    visit = null;
+    const playOn = playingOn;
+    playingOn = false;
+    if (!playOn) visit = null; // playing on keeps the same <video>, which a phone lets carry on playing
+    neighbours = null;
     missing = false;
     failed = false;
     index = 0;
@@ -33,7 +42,10 @@
     watchedSent = false;
     getJSON<VisitDetail>(`/api/visits/${current}`)
       .then((v) => {
-        if (current === id) visit = v;
+        if (current !== id) return;
+        visit = v;
+        loadNeighbours(v);
+        if (playOn) play(Math.max(0, v.clips.findIndex((c) => c.web_url)));
       })
       .catch((e) => {
         if (current !== id) return;
@@ -41,6 +53,27 @@
         else failed = true;
       });
   });
+
+  // The list this visit was opened from, or else the section it is in.
+  function loadNeighbours(v: VisitDetail) {
+    const current = id;
+    const list = new URLSearchParams(window.location.search).get("list") ?? `category=${v.category}`;
+    getJSON<{ previous: number | null; next: number | null }>(`/api/visits/${current}/neighbours?${list}`)
+      .then((n) => {
+        if (current === id) neighbours = n;
+      })
+      .catch(() => {
+        // no Previous or Next this time; the visit itself still plays
+      });
+  }
+
+  // Replaces this history entry, so Back goes to the list however many visits were played on the way.
+  function playOnTo(target: number | null | undefined) {
+    if (target === null || target === undefined) return;
+    playingOn = true;
+    if (window.scrollY > 0) window.scrollTo(0, 0);
+    navigate(`/visit/${target}${window.location.search}`, { replace: true });
+  }
 
   const clip = $derived(visit?.clips[index] ?? null);
   // Until the Mac's day is known (the status request failed), judge by the visit's own date: the time still shows.
@@ -87,6 +120,7 @@
     if (!visit) return;
     const next = visit.clips.findIndex((c, i) => i > index && c.web_url);
     if (next !== -1) play(next);
+    else playOnTo(neighbours?.next);
   }
 
   function onPlay() {
@@ -101,6 +135,7 @@
     try {
       const fresh = await getJSON<VisitDetail>(`/api/visits/${id}`);
       visit = fresh;
+      loadNeighbours(fresh);
       return fresh;
     } catch {
       return null;
@@ -108,7 +143,7 @@
   }
 
   async function pick(g: Guess) {
-    if (!visit || busy) return;
+    if (!visit || busy || String(visit.id) !== id) return;
     busy = true;
     const before = visit.category;
     try {
@@ -132,7 +167,7 @@
   }
 
   async function toggleFavourite() {
-    if (!visit || busy) return;
+    if (!visit || busy || String(visit.id) !== id) return;
     busy = true;
     const want = !visit.is_favourite;
     try {
@@ -154,6 +189,31 @@
       menuOpen = false;
       dlButton?.focus();
     }
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    if (pickerOpen || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const t = e.target;
+    if (t instanceof HTMLVideoElement) return; // arrows seek inside the player
+    if (t instanceof Element && t.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
+    e.preventDefault();
+    playOnTo(e.key === "ArrowRight" ? neighbours?.next : neighbours?.previous);
+  }
+
+  // A swipe left goes to the next visit and a swipe right to the previous one. Up and down still scroll the page.
+  function onDown(e: PointerEvent) {
+    start = null;
+    if (e.pointerType === "mouse") return; // a mouse drag selects text; the Mac has the buttons and the arrow keys
+    const target = e.target as Element | null;
+    if (target?.closest("button, a, input, [role=dialog]")) return;
+    if (target instanceof HTMLVideoElement && e.clientY > target.getBoundingClientRect().bottom - CONTROLS_PX) return;
+    start = { x: e.clientX, y: e.clientY };
+  }
+  function onUp(e: PointerEvent) {
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    start = null;
+    if (Math.abs(dx) <= SWIPE_PX || Math.abs(dx) < Math.abs(dy)) return;
+    playOnTo(dx < 0 ? neighbours?.next : neighbours?.previous);
   }
   function onOutside(e: MouseEvent) {
     if (menuOpen && menuEl && !menuEl.contains(e.target as Node)) menuOpen = false;
@@ -162,11 +222,24 @@
 
 <svelte:window onkeydown={onKey} onclick={onOutside} />
 
-<div class="visit">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="visit" onpointerdown={onDown} onpointerup={onUp} onpointercancel={() => (start = null)}>
   <header>
     <button type="button" class="back" aria-label="Back" onclick={() => back("/")}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
     </button>
+    {#if neighbours && (neighbours.previous !== null || neighbours.next !== null)}
+      <div class="steps">
+        <button type="button" class="step" disabled={neighbours.previous === null} onclick={() => playOnTo(neighbours?.previous)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
+          Previous
+        </button>
+        <button type="button" class="step" disabled={neighbours.next === null} onclick={() => playOnTo(neighbours?.next)}>
+          Next
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>
+        </button>
+      </div>
+    {/if}
   </header>
 
   {#if missing}
@@ -290,8 +363,14 @@
 {/if}
 
 <style>
-  .visit { display: flex; flex-direction: column; gap: 16px; padding-bottom: 20px; }
-  header { padding: 14px 0 0; }
+  .visit { display: flex; flex-direction: column; gap: 16px; padding-bottom: 20px; touch-action: pan-y; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0 0; }
+  .steps { display: flex; gap: 8px; }
+  .step {
+    display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px; border-radius: 12px; border: none;
+    background: #fff; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .step:disabled { color: var(--ink-2); background: none; cursor: default; }
   .back {
     display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%;
     border: none; background: #fff; color: var(--ink); cursor: pointer;

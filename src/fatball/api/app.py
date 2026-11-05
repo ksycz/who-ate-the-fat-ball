@@ -269,27 +269,6 @@ def create_app(
     def stats_page(conn: Conn, weeks: Annotated[int, Query(ge=1, le=52)] = 4):
         return stats.summary(conn, now().astimezone().date(), weeks)
 
-    @app.get("/api/videos")
-    def videos_feed(
-        conn: Conn,
-        limit: Annotated[int, Query(ge=1, le=200)] = 24,
-        cursor: str | None = None,
-        species: str | None = None,
-    ):
-        """Bird visits with a playable video, newest first; `filters` are the busiest species lately."""
-        after = _decode_cursor(cursor) if cursor else None
-        rows = stats.videos(conn, limit + 1, after, species)
-        page = rows[:limit]
-        return {
-            "items": [
-                {**_visit_json(r), "video_url": _media_url(r["video_path"]), "video_clip_id": r["video_clip_id"]}
-                for r in page
-            ],
-            "next_cursor": _encode_cursor(page[-1]) if len(rows) > limit else None,
-            "total": stats.videos_total(conn, species),
-            "filters": stats.top_species(conn, now().astimezone().date()),
-        }
-
     @app.get("/api/clips")
     def clips(conn: Conn, limit: Annotated[int, Query(ge=1, le=200)] = 50, before: datetime | None = None):
         rows = repo.list_clips(conn, limit, before, status="ready")
@@ -333,6 +312,26 @@ def create_app(
                 for g in repo.visit_guesses(conn, visit_id)
             ],
         }
+
+    @app.get("/api/visits/{visit_id}/neighbours")
+    def visit_neighbours(
+        visit_id: int,
+        conn: Conn,
+        category: Literal["birds", "other"] | None = None,
+        species: str | None = None,
+        day: date | None = None,
+        favourite: bool | None = None,
+        only: Literal["dogs", "empty"] | None = None,
+    ):
+        """The visits before and after this one in a list (the filters of GET /api/visits), for playing on."""
+        if only is not None and category != "other":
+            raise HTTPException(status_code=422, detail="only goes with category=other")
+        found = repo.visit_neighbours(
+            conn, visit_id, category=category, species=species, day=day, favourite=favourite, only=only
+        )
+        if found is None:
+            raise HTTPException(status_code=404)
+        return {"previous": found[0], "next": found[1]}
 
     @app.post("/api/visits/{visit_id}/watched", status_code=204)
     def watched(visit_id: int, conn: Conn):

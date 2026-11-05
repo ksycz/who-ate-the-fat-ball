@@ -68,3 +68,45 @@ test("watching the new species clears the banner", async ({ page }) => {
   await expect(page.getByRole("link", { name: /Great tit/ }).first()).toBeVisible();
   await expect(page.getByText("New species")).toBeHidden();
 });
+
+test("Next and Previous go through the list the visit was opened from", async ({ page }) => {
+  await page.goto("/birds/species");
+  await page.getByRole("link", { name: /Blue tit/ }).click();
+  await page.getByRole("link", { name: /Blue tit/ }).first().click();
+  await expect(page.getByRole("heading", { name: "Blue tit", level: 1 })).toBeVisible();
+  const next = page.getByRole("button", { name: "Next" });
+  await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page).toHaveURL(/\/visit\/\d+\?list=/);
+  await expect(page.getByRole("heading", { name: "Blue tit", level: 1 })).toBeVisible();
+  await expect(next).toBeDisabled(); // only blue tits in this list: the older visits are great tits
+  await page.getByRole("button", { name: "Previous" }).click();
+  await expect(next).toBeEnabled();
+});
+
+test("a clip that ends plays on to the next visit, and Back returns to the list", async ({ page }) => {
+  await page.goto("/birds");
+  await page.locator("a.card").first().click();
+  await expect(page.getByRole("button", { name: "Next" })).toBeEnabled();
+  const first = page.url();
+  // Past the last clip of this visit, as when it finishes playing.
+  for (let i = 0; i < 3 && page.url() === first; i++) {
+    await page.locator("video").evaluate((v) => v.dispatchEvent(new Event("ended")));
+    await page.waitForTimeout(100);
+  }
+  await expect(page).not.toHaveURL(first);
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/birds$/);
+});
+
+test("arrow keys move between visits", async ({ page }) => {
+  await page.goto("/birds");
+  await page.locator("a.card").first().click();
+  await expect(page.getByRole("button", { name: "Next" })).toBeEnabled();
+  const first = page.url();
+  await page.keyboard.press("ArrowRight");
+  await expect(page).not.toHaveURL(first);
+  await expect(page.getByRole("button", { name: "Previous" })).toBeEnabled();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page).toHaveURL(first);
+});

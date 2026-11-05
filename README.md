@@ -5,12 +5,12 @@
 
 A free, local app for bird-feeder cameras: it collects the clips for you and tells you who has been visiting. No ads, no cloud, no false alarms.
 
-> **Status: phase 1 complete.** Clip ingest, bird recognition, and a gallery with Videos, Stats and bulk tools work today on your phone, iPad or Mac. Phase 2 moves the app to a Raspberry Pi and adds phone notifications and dark mode.
+> **Status: phase 1 complete.** Clip ingest, bird recognition, and a gallery with Stats and bulk tools work today on your phone, iPad or Mac. Phase 2 moves the app to a Raspberry Pi and adds phone notifications and dark mode.
 
 | Mac | Phone |
 |---|---|
 | ![Today on a Mac, a grid of visits](docs/screenshots/mac-today.png) | ![Today on a phone](docs/screenshots/phone-today.png) |
-| ![Videos on a Mac, one clip at a time](docs/screenshots/mac-videos.png) | ![Videos on a phone, a full-screen feed](docs/screenshots/phone-videos.png) |
+| ![Birds on a Mac, every visit grouped by day](docs/screenshots/mac-birds.png) | ![A visit on a phone, with Previous and Next](docs/screenshots/phone-visit.png) |
 | ![Stats on a Mac, with a heatmap of busy times](docs/screenshots/mac-stats.png) | ![Stats on a phone](docs/screenshots/phone-stats.png) |
 
 <sub>Screenshots from demo mode, with plain-colour placeholder clips instead of real footage.</sub>
@@ -38,7 +38,7 @@ Cheap outdoor Wi-Fi cameras (iCSee, XMEye and other Xiongmai-based models) are g
   - **Today**: the day's visits, the fat-ball champion, a banner for a new species and the camera's status.
   - **Birds, Other and Favourites**: every visit, grouped by day. Other holds dogs, other animals, people and empty clips.
   - **A visit**: play its clips, mark it as a favourite, download it, and fix a wrong name with "What is it?" (with Undo).
-  - **Videos**: one clip after another, full screen on a phone and as a light page on a Mac, filtered by species.
+  - **One after another**: when a visit ends, the next one in the list you opened it from starts by itself. Swipe left or right on a phone, or use Previous, Next or the arrow keys.
   - **By species**: a card for each bird seen (switch Birds to **By species**), opening every visit of that bird.
   - **Select and move**: pick many visits and move them to another section at once (with Undo), or drag them onto a section on the Mac. Empty clips can be deleted.
   - **Zip downloads**: download the selected visits, or a whole day, as one .zip file.

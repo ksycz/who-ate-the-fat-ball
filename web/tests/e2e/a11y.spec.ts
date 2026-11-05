@@ -48,13 +48,6 @@ test("Other", async ({ page }) => {
   await noViolations(page);
 });
 
-test("Videos", async ({ page }) => {
-  await page.goto("/videos");
-  await expect(page.getByText(/^1 of \d+/)).toBeVisible();
-  await expect(page.locator("video")).toHaveCount(1);
-  await noViolations(page);
-});
-
 test("Stats", async ({ page }) => {
   await page.goto("/stats");
   await expect(page.getByRole("heading", { name: "Stats", level: 1 })).toBeVisible();
