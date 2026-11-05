@@ -58,17 +58,3 @@ def test_stats_shape_and_weeks_bounds(local, conn, cam):
     assert local.get("/api/stats?weeks=0").status_code == 422
     assert local.get("/api/stats?weeks=53").status_code == 422
     assert local.get("/api/stats?weeks=52").status_code == 200
-
-
-def test_videos_shape_paging_and_filters(local, conn, cam):
-    ids = [add_visit(conn, cam, f"2026-10-{d}T09:00:00+01:00") for d in (28, 29, 30)]
-    blue = add_visit(conn, cam, "2026-10-30T10:00:00+01:00", BLUE)
-    body = local.get("/api/videos?limit=2").json()
-    assert [i["id"] for i in body["items"]] == [blue, ids[2]]
-    assert body["items"][0]["video_url"].startswith("/media/c") and body["items"][0]["video_clip_id"]
-    assert body["total"] == 4
-    assert [f["scientific"] for f in body["filters"]] == [GREAT, BLUE]
-    rest = local.get(f"/api/videos?limit=2&cursor={body['next_cursor']}").json()
-    assert [i["id"] for i in rest["items"]] == [ids[1], ids[0]] and rest["next_cursor"] is None
-    only = local.get(f"/api/videos?species={BLUE}").json()
-    assert [i["id"] for i in only["items"]] == [blue] and only["total"] == 1

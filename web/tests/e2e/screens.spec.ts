@@ -54,10 +54,6 @@ const screens: [string, (page: Page, request: APIRequestContext) => Promise<void
     await page.goto(`/visit/${await firstVisitId(request, GREAT_TIT)}`);
     await expect(page.getByRole("button", { name: "Not right? Change" })).toBeVisible();
   }],
-  ["videos", async (page) => {
-    await page.goto("/videos");
-    await expect(page.getByText(/^1 of \d+/)).toBeVisible();
-  }],
   ["stats", async (page) => {
     await page.goto("/stats");
     await expect(page.getByRole("heading", { name: "Stats", level: 1 })).toBeVisible();

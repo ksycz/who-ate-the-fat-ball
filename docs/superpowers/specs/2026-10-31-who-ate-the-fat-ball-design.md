@@ -158,7 +158,7 @@ The prototypes are the reference for layout. This section fixes the behaviour.
   - A **"Today's fat-ball champion"** card: the species with the most visits today, its count, and its first visit time.
   - Today's visits, newest first.
   - States: empty ("Quiet so far…"), processing ("Checking who it is…"), "1 clip couldn't be fetched · Retry", and a camera-problem notice.
-- **Videos:** a full-screen feed.
+- **Videos:** a full-screen feed. *(Removed on 2026-11-05: a visit now plays on to the next one in the list it was opened from, with swipe and Previous / Next. The bottom menu is Today · Birds · Stats · More.)*
   - Filter chips: All birds, plus the most common species.
   - Favourite, **What is it?** and Download buttons.
   - Both swipe and Previous / Next.

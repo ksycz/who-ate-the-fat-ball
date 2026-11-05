@@ -75,12 +75,19 @@
     reload();
   }
 
-  function url(after: string | null): string {
-    const q = new URLSearchParams({ limit: String(PAGE) });
+  // What this list shows; a visit opened from it plays on through the same list.
+  const listQuery = $derived.by(() => {
+    const q = new URLSearchParams();
     if (kind === "favourites") q.set("favourite", "true");
     else q.set("category", kind);
     if (species !== null) q.set("species", species);
     if (kind === "other" && filter !== "all") q.set("only", filter);
+    return q.toString();
+  });
+
+  function url(after: string | null): string {
+    const q = new URLSearchParams(listQuery);
+    q.set("limit", String(PAGE));
     if (after !== null) q.set("cursor", after);
     return `/api/visits?${q}`;
   }
@@ -292,6 +299,7 @@
         {#each group.visits as visit (visit.id)}
           <VisitCard
             {visit}
+            list={listQuery}
             today={$serverDay ?? ""}
             selecting={$selection.on}
             selected={$selection.ids.has(visit.id)}

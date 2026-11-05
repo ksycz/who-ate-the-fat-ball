@@ -521,26 +521,12 @@ _VISIT_SELECT = (
 )
 
 
-def list_visits(
-    conn: sqlite3.Connection,
-    limit: int | None,
-    *,
-    after: tuple[str, int] | None = None,
-    category: str | None = None,
-    species: str | None = None,
-    day: date | None = None,
-    favourite: bool | None = None,
-    only: Literal["dogs", "empty"] | None = None,
-) -> list[sqlite3.Row]:
-    """Visits newest first (`favourite` keeps only starred or only unstarred ones); `limit=None` means all of them.
-    `only` narrows Other to the dog visits or the empty clips.
-
-    `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
-    (stored as local-time ISO text, like clips)."""
+def _visit_filters(
+    category: str | None, species: str | None, day: date | None, favourite: bool | None,
+    only: Literal["dogs", "empty"] | None,
+) -> tuple[list[str], list]:
+    """The WHERE fragments (fixed strings) and their values for a list of visits; the query joins `s` as species."""
     where, args = [], []
-    if after is not None:
-        where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
-        args += [after[0], after[0], after[1]]
     if category is not None:
         where.append("v.category = ?")
         args.append(category)
@@ -558,9 +544,66 @@ def list_visits(
         args.append(DOG)
     elif only == "empty":
         where.append("v.category = 'other' AND v.subject = 'nothing'")
+    return where, args
+
+
+def list_visits(
+    conn: sqlite3.Connection,
+    limit: int | None,
+    *,
+    after: tuple[str, int] | None = None,
+    category: str | None = None,
+    species: str | None = None,
+    day: date | None = None,
+    favourite: bool | None = None,
+    only: Literal["dogs", "empty"] | None = None,
+) -> list[sqlite3.Row]:
+    """Visits newest first (`favourite` keeps only starred or only unstarred ones); `limit=None` means all of them.
+    `only` narrows Other to the dog visits or the empty clips.
+
+    `after` is the (started_at, id) of the last visit already seen; `day` is the local date of started_at
+    (stored as local-time ISO text, like clips)."""
+    where, args = _visit_filters(category, species, day, favourite, only)
+    if after is not None:
+        where.append("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))")
+        args += [after[0], after[0], after[1]]
     clause = f"WHERE {' AND '.join(where)} " if where else ""  # fragments are fixed strings above
     sql = f"{_VISIT_SELECT}{clause}ORDER BY v.started_at DESC, v.id DESC LIMIT ?"
     return conn.execute(sql, (*args, -1 if limit is None else limit)).fetchall()  # SQLite: LIMIT -1 is no limit
+
+
+def visit_neighbours(
+    conn: sqlite3.Connection,
+    visit_id: int,
+    *,
+    category: str | None = None,
+    species: str | None = None,
+    day: date | None = None,
+    favourite: bool | None = None,
+    only: Literal["dogs", "empty"] | None = None,
+) -> tuple[int | None, int | None] | None:
+    """The ids just above (newer) and just below (older) this visit in a newest-first list, counting only visits with
+    a video to play. The visit needn't match the filters itself, so a visit just moved out of the list keeps its
+    place. None when the visit doesn't exist."""
+    visit = conn.execute("SELECT started_at FROM visit WHERE id = ?", (visit_id,)).fetchone()
+    if visit is None:
+        return None
+    where, args = _visit_filters(category, species, day, favourite, only)
+    where.append(
+        "EXISTS (SELECT 1 FROM visit_clip vc JOIN clip c ON c.id = vc.clip_id WHERE vc.visit_id = v.id "
+        "AND c.web_path IS NOT NULL AND c.deleted_at IS NULL)"
+    )
+    base = f"SELECT v.id FROM visit v LEFT JOIN species s ON s.id = v.species_id WHERE {' AND '.join(where)} AND "
+    at = (visit["started_at"], visit["started_at"], visit_id)
+
+    def one(side: str, order: str) -> int | None:
+        row = conn.execute(f"{base}{side} ORDER BY {order} LIMIT 1", (*args, *at)).fetchone()
+        return row["id"] if row else None
+
+    return (
+        one("(v.started_at > ? OR (v.started_at = ? AND v.id > ?))", "v.started_at, v.id"),
+        one("(v.started_at < ? OR (v.started_at = ? AND v.id < ?))", "v.started_at DESC, v.id DESC"),
+    )
 
 
 def sorted_counts(conn: sqlite3.Connection) -> dict[str, int]:

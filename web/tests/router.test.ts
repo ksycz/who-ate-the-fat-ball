@@ -6,6 +6,9 @@ describe("matchRoute", () => {
   it("parses a visit id", () => {
     expect(matchRoute("/visit/12")).toEqual({ name: "visit", params: { id: "12" } });
   });
+  it("no longer has a Videos page", () => {
+    expect(matchRoute("/videos").name).toBe("notfound");
+  });
   it("names the fixed pages", () => {
     expect(matchRoute("/").name).toBe("today");
     expect(matchRoute("/birds").name).toBe("birds");

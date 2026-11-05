@@ -130,39 +130,3 @@ def test_species_is_new_within_7_days(conn, cam):
     add_visit(conn, cam, day(1), BLUE)
     new = {r["scientific"]: r["is_new"] for r in stats.species_for_period(conn, TODAY, "week")}
     assert new == {GREAT: True, BLUE: False}
-
-
-def test_videos_skip_visits_without_web_video(conn, cam):
-    with_video = add_visit(conn, cam, day(1))
-    add_visit(conn, cam, day(2), video=False)
-    add_visit(conn, cam, day(3), deleted=True)
-    add_visit(conn, cam, day(1), DOG, category="other")
-    rows = stats.videos(conn, 10, None, None)
-    assert [r["id"] for r in rows] == [with_video]
-    assert rows[0]["video_path"].endswith(".mp4") and rows[0]["video_clip_id"] is not None
-    assert rows[0]["clip_count"] == 1
-    assert stats.videos_total(conn, None) == 1
-
-
-def test_videos_species_filter_total_and_paging(conn, cam):
-    ids = [add_visit(conn, cam, day(i), GREAT) for i in (1, 2, 3)]
-    blue = add_visit(conn, cam, day(1, "10:00:00"), BLUE)
-    assert [r["id"] for r in stats.videos(conn, 10, None, GREAT)] == ids
-    assert [r["id"] for r in stats.videos(conn, 10, None, BLUE)] == [blue]
-    assert stats.videos_total(conn, GREAT) == 3 and stats.videos_total(conn, None) == 4
-    first = stats.videos(conn, 2, None, GREAT)
-    rest = stats.videos(conn, 2, (first[-1]["started_at"], first[-1]["id"]), GREAT)
-    assert [r["id"] for r in first + rest] == ids
-
-
-def test_top_species_last_30_days(conn, cam):
-    for i in (1, 2):
-        add_visit(conn, cam, day(i), BLUE)
-    add_visit(conn, cam, day(3), GREAT)
-    add_visit(conn, cam, day(30), GREAT)  # outside
-    add_visit(conn, cam, day(30), GREAT)
-    add_visit(conn, cam, day(1), DOG, category="other")
-    assert stats.top_species(conn, TODAY) == [
-        {"scientific": BLUE, "name": "blue tit"}, {"scientific": GREAT, "name": "great tit"},
-    ]
-    assert stats.top_species(conn, TODAY, n=1) == [{"scientific": BLUE, "name": "blue tit"}]
